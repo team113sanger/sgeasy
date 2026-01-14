@@ -10,3 +10,5 @@
 ^README\.Rmd$
 ^\.claude$
 ^\.gitlab-ci\.yml$
+^Dockerfile$
+^docker-compose\.yml$
