@@ -1,0 +1,316 @@
+---
+title: "SGE Downstream Analysis Workflow"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{SGE Downstream Analysis Workflow}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  eval = FALSE
+)
+```
+
+## Introduction
+This vignette demonstrates a complete workflow for analyzing Saturation Genome
+Editing (SGE) screen data using the sgedown package. The workflow includes:
+
+1. Reading and preparing count data
+2. Joining with sample metadata and variant annotations
+3. Normalizing using control variants (synonymous/intronic)
+4. Running differential abundance analysis with DESeq2
+5. Visualizing results
+
+## Setup
+
+Load the required packages:
+
+```{r libraries, message=FALSE}
+library(sgedown)
+library(fs)
+library(readr)
+library(dplyr)
+library(purrr)
+library(tidyr)
+library(pheatmap)
+library(RColorBrewer)
+```
+
+## Data Import
+
+### Reading Count Files
+
+SGE count data typically comes from multiple quantification files. Use `fs::dir_ls()`
+to find all count files:
+```{r find-files}
+input_files <- fs::dir_ls(
+  "inputs/quants",
+  recurse = TRUE,
+  glob = "*lib_counts.tsv.gz"
+)
+
+# Optionally filter files
+input_files <- input_files[!grepl(input_files, pattern = "pel")]
+
+input_files
+```
+
+Read all count files into a single dataset:
+
+```{r read-counts}
+counts_dataset <- readr::read_tsv(input_files, comment = "##")
+```
+
+### Loading Metadata
+
+Load the screen metadata containing sample information:
+
+```{r load-metadata}
+screen_metadata <- readr::read_tsv("screen_metadata.tsv")
+```
+
+If you have additional reference data (e.g., EGXI screen data), you can join it:
+
+```{r join-reference, eval=FALSE}
+# Example: Adding EGXI reference data
+EGXI_data <- readr::read_tsv("path/to/EGXI_screen_quants.tsv")
+
+lookup <- EGXI_data |>
+  select(sequencing_id, supplier_name) |>
+  dplyr::rename(
+    SAMPLE = supplier_name,
+    supplier_name = sequencing_id
+  )
+
+counts_dataset <- counts_dataset |>
+  left_join(lookup, by = "SAMPLE") |>
+  mutate(SAMPLE = ifelse(!is.na(supplier_name), supplier_name, SAMPLE)) |>
+  select(-supplier_name)
+```
+
+## Data Preparation
+
+### Joining Counts with Metadata
+
+Combine count data with sample metadata:
+
+```{r join-metadata}
+complete_dataset <- counts_dataset |>
+  left_join(screen_metadata, by = c("SAMPLE" = "sequencing_id"))
+```
+
+### Sample Exclusion
+
+Remove any problematic samples:
+
+```{r exclude-samples}
+exclude_samples <- c("SAMPLE_A_10_pel0000")  # Replace with actual sample names
+
+complete_dataset <- complete_dataset |>
+  dplyr::filter(!supplier_name %in% exclude_samples) |>
+  dplyr::filter(!SAMPLE %in% exclude_samples)
+```
+
+### Splitting by Targeton
+
+If your data contains multiple targetons, split into separate datasets:
+
+```{r split-targeton}
+targeton_matrices <- complete_dataset |>
+  group_by(targeton_id) |>
+  group_split()
+```
+
+### Creating Count Matrices
+
+Pivot the data to wide format with samples as columns:
+
+```{r pivot-wide}
+count_matrices <- map(
+  targeton_matrices,
+  pivot_wider,
+  names_from = "supplier_name",
+  values_from = "COUNT",
+  id_cols = c("NAME", "SEQUENCE", "LENGTH", "targeton_id")
+)
+```
+
+Handle duplicate sequences by keeping the first occurrence:
+
+```{r deduplicate}
+unique_matrices <- map(
+  count_matrices,
+  ~ group_by(.x, SEQUENCE) |>
+    slice_head(n = 1) |>
+    ungroup()
+)
+```
+
+### Filtering by Count Threshold
+
+Use `filter_by_counts()` to remove low-count variants:
+
+```{r filter-counts}
+filtered_matrices <- map(
+  unique_matrices,
+  filter_by_counts,
+  min_counts = 10
+)
+```
+
+## Adding Variant Annotations
+
+Load VEP annotations and join with count data:
+
+```{r load-annotations}
+# Get annotation file path from metadata
+annotations <- screen_metadata |>
+  pull(vep_anno) |>
+  unique()
+
+master_annotation <- readr::read_tsv(annotations)
+
+# Join annotations
+annotated_counts <- map(
+  filtered_matrices,
+  ~ left_join(
+    .x,
+    master_annotation,
+    by = c("SEQUENCE" = "Seq", "targeton_id" = "Targeton_ID")
+  )
+)
+```
+
+## Normalization
+
+### Creating Normalization Matrices
+
+Extract neutral variants (synonymous and intronic) for normalization:
+
+```{r norm-matrix}
+normalisation_matrices <- map(
+  annotated_counts,
+  create_normalization_matrix
+)
+```
+
+This uses variants with no expected functional effect as controls for
+estimating library size factors.
+
+### Creating Input Matrices
+
+Create the full count matrices for analysis:
+
+```{r input-matrix}
+complete_matrices <- map(
+  annotated_counts,
+  create_count_matrix
+)
+```
+
+## Differential Abundance Analysis
+
+Run the complete differential abundance pipeline:
+
+```{r run-analysis}
+deseq_results <- map2(
+  complete_matrices,
+  normalisation_matrices,
+  run_differential_analysis,
+  sample_metadata = screen_metadata
+)
+```
+
+The `run_differential_analysis()` function:
+
+1. Estimates size factors from control variants
+2. Creates a DESeq2 dataset with the experimental design
+3. Applies control-derived normalization
+4. Runs Wald tests for all condition contrasts
+5. Computes regularized log transformation
+6. Generates z-scores for visualization
+
+### Accessing Results
+
+Each result is a named list:
+
+```{r access-results}
+# For the first targeton
+results <- deseq_results[[1]]
+
+# DESeq2 results table
+deseq_table <- results$results
+
+# rlog-transformed data for visualization
+rlog_data <- results$rlog
+
+# Multi-contrast summary with z-scores
+contrast_summary <- results$contrast_summary
+```
+
+## Visualization
+
+### Quality Control Plots
+
+#### Dispersion Estimates
+
+Check the dispersion estimates from DESeq2:
+
+```{r disp-plot, fig.width=6, fig.height=5}
+DESeq2::plotDispEsts(results$dds)
+```
+
+#### Sample Distance Heatmap
+
+Visualize sample similarity:
+
+```{r heatmap, fig.width=8, fig.height=6}
+sample_dists <- dist(t(DESeq2::assay(results$rlog)))
+sample_dist_matrix <- as.matrix(sample_dists)
+
+pheatmap::pheatmap(
+  sample_dist_matrix,
+  clustering_distance_rows = sample_dists,
+  clustering_distance_cols = sample_dists,
+  col = colorRampPalette(rev(RColorBrewer::brewer.pal(9, "Blues")))(255)
+)
+```
+
+### Sample Correlation Plots
+
+Use `plot_sample_scatter()` to compare replicates:
+
+```{r scatter-plots, fig.width=8, fig.height=8}
+# Get samples grouped by condition
+sample_groups <- screen_metadata |>
+  group_by(targeton_id, condition) |>
+  select(supplier_name) |>
+  dplyr::filter(supplier_name %in% colnames(DESeq2::assay(results$rlog))) |>
+  group_split()
+
+sample_group_lists <- map(sample_groups, ~ pull(.x, supplier_name))
+
+# Plot each group
+scatter_plots <- map(
+  sample_group_lists,
+  ~ plot_sample_scatter(results$rlog, .x)
+)
+```
+
+## Exporting Results
+
+Save the contrast summary to a file:
+
+```{r export, eval=FALSE}
+readr::write_tsv(results$contrast_summary, "DEG_summary.tsv")
+```
+
+## Session Info
+
+```{r session-info}
+sessionInfo()
+```

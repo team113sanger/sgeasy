@@ -1,0 +1,39 @@
+url: ~
+
+template:
+  bootstrap: 5
+
+navbar:
+  structure:
+    left: [intro, reference, articles]
+    right: [search, github]
+
+reference:
+  - title: "Normalization"
+    desc: "Size factor estimation from control data"
+    contents:
+      - estimate_size_factors
+      - compute_control_size_factors
+
+  - title: "Data Wrangling"
+    desc: "Matrix creation and filtering"
+    contents:
+      - create_normalization_matrix
+      - create_count_matrix
+      - filter_by_counts
+
+  - title: "Differential Analysis"
+    desc: "DESeq2-based differential abundance"
+    contents:
+      - run_differential_analysis
+
+  - title: "Visualization"
+    desc: "Plotting functions"
+    contents:
+      - plot_sample_scatter
+
+articles:
+  - title: "Getting Started"
+    navbar: ~
+    contents:
+      - sge-analysis-workflow

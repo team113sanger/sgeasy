@@ -1,0 +1,12 @@
+^.*\.Rproj$
+^\.Rproj\.user$
+^LICENSE\.md$
+^_pkgdown\.yml$
+^docs$
+^pkgdown$
+^\.github$
+^demo\.R$
+^helpers\.R$
+^README\.Rmd$
+^\.claude$
+^\.gitlab-ci\.yml$

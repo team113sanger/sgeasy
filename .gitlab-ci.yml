@@ -1,0 +1,72 @@
+stages:
+  - build
+  - deploy
+  - test
+
+include:
+  # DOCS: https://gitlab.internal.sanger.ac.uk/team113sanger/common/cicd-template/-/blob/develop/README.md
+  - project: "team113sanger/common/cicd-template"
+    ref: 0.3.6
+    file: ".gitlab-ci-components.yml"
+
+#############
+# TEMPLATES #
+#############
+
+.generic-wo-script-or-rules:
+  extends:
+    - .component-variables
+    - .component-before_script
+    - .component-after_script
+    - .component-tags-shared-large-runner
+
+.dev-variables:
+  variables:
+    USE_DOCKER_TARGET_STAGE: 1
+    DOCKER_TARGET_STAGE: base_stage
+    DOCKER_BUILDKIT: 1
+    PRE_FETCH_BASE_IMAGE: rocker/r-ver:4.4.0
+    HAS_SUDO: 0
+    DOCKERFILE_PATH: Dockerfile
+    IMAGE_TAG_SUFFIX: "-dev"
+
+############
+#   JOBS   #
+############
+
+build-dev:
+  stage: build
+  extends:
+    - .generic-wo-script-or-rules
+    - .dev-variables
+    - .component-script_docker-build
+    - .component-rules-except-release
+
+unit-test-dev:
+  stage: test
+  extends:
+    - .generic-wo-script-or-rules
+    - .dev-variables
+    - .component-rules-except-release
+  script:
+    - echo "*** [SCRIPT] START ***"
+    - echo "Running R package checks in docker container"
+    - echo "Testing against CANDIDATE_IMAGE='${CANDIDATE_IMAGE:?not-set-in-before_script}'"
+    - docker pull "${CANDIDATE_IMAGE}"
+    - docker run --rm -t "${CANDIDATE_IMAGE}" Rscript -e "devtools::check(error_on = 'error')"
+    - echo "*** [SCRIPT] END ***"
+
+pages:
+  stage: deploy
+  extends:
+    - .generic-wo-script-or-rules
+    - .dev-variables
+  script:
+    - echo "*** [SCRIPT] Building pkgdown site ***"
+    - docker pull "${CANDIDATE_IMAGE}"
+    - docker run --rm -v "${CI_PROJECT_DIR}:/workspace" -w /workspace "${CANDIDATE_IMAGE}" Rscript -e "if (!require('pkgdown', quietly = TRUE)) install.packages('pkgdown'); if (!require('devtools', quietly = TRUE)) install.packages('devtools'); devtools::install('.'); pkgdown::build_site()"
+    - mv docs public
+    - echo "*** [SCRIPT] Site built and ready for deployment ***"
+  artifacts:
+    paths:
+      - public
