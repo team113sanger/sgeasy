@@ -118,3 +118,62 @@ filter_by_counts <- function(data,
 
   result
 }
+
+
+#' Simplify variant consequence annotations
+#'
+#' Creates a simplified consequence annotation column by mapping VEP consequences
+#' to a reduced set of categories, considering mutator type where relevant.
+#'
+#' @param data A data frame with Consequence and mutator columns.
+#'
+#' @return Data frame with an additional slim_consequence column.
+#'
+#' @details
+#' The function maps VEP consequences to simplified categories:
+#' \itemize{
+#'   \item Clinical inframe deletions/insertions (custom mutator)
+#'   \item Synonymous (including stop_retained with appropriate mutators)
+#'   \item Start/stop lost variants
+#'   \item Codon deletions (inframe mutator)
+#'   \item Stop gained, frameshift, splice variants
+#'   \item Missense, intron, UTR variants
+#' }
+#'
+#' @examples
+#' \dontrun{
+#' data_with_slim <- slim_consequence(annotated_data)
+#' }
+#'
+#' @export
+slim_consequence <- function(data) {
+  data |>
+    dplyr::mutate(
+      slim_consequence = dplyr::case_when(
+        # More specific conditions first (with mutator requirements)
+        stringr::str_detect(.data$Consequence, "inframe_deletion") &
+          .data$mutator == "custom" ~ "clinical_inframe_deletion",
+        stringr::str_detect(.data$Consequence, "inframe_insertion") &
+          .data$mutator == "custom" ~ "clinical_inframe_insertion",
+        stringr::str_detect(.data$Consequence, "stop_retained_variant") &
+          .data$mutator %in% c("snvre", "snv", "custom") ~ "synonymous",
+        stringr::str_detect(.data$Consequence, "start_lost") &
+          .data$mutator %in% c("snvre", "snv", "custom", "ala") ~ "start_lost",
+        stringr::str_detect(.data$Consequence, "stop_lost") &
+          .data$mutator %in% c("snvre", "snv", "custom", "ala") ~ "stop_lost",
+        stringr::str_detect(.data$mutator, "inframe") ~ "codon_deletion",
+
+        # Simple pattern matches
+        stringr::str_detect(.data$Consequence, "stop_gained") ~ "stop_gained",
+        stringr::str_detect(.data$Consequence, "frameshift_variant") ~ "frameshift",
+        stringr::str_detect(.data$Consequence, "splice_acceptor_variant") ~ "splice_acceptor",
+        stringr::str_detect(.data$Consequence, "splice_donor_variant") ~ "splice_donor",
+        stringr::str_detect(.data$Consequence, "missense_variant") ~ "missense",
+        stringr::str_detect(.data$Consequence, "synonymous_variant") ~ "synonymous",
+        stringr::str_detect(.data$Consequence, "intron_variant") ~ "intron",
+        stringr::str_detect(.data$Consequence, "UTR_variant") ~ "UTR",
+
+        TRUE ~ NA_character_
+      )
+    )
+}
