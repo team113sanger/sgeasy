@@ -280,7 +280,7 @@ prepare_count_matrices <- function(complete_dataset,
 #'
 #' @return A list containing:
 #'   \describe{
-#'     \item{deseq_results}{List of DESeq2 results by targeton}
+#'     \item{deseq_results}{List of [SGEResults] objects by targeton}
 #'     \item{contrast_tables}{Combined contrast table for all targetons}
 #'     \item{rlog_results}{List of rlog-transformed data by targeton}
 #'   }
@@ -314,11 +314,11 @@ analyze_screens <- function(complete_matrices,
   message("  Combining contrast tables...")
   contrast_tables <- purrr::map_dfr(
     deseq_results,
-    purrr::pluck, "contrast_summary",
+    \(x) x@contrast_summary,
     .id = "Targeton_ID"
   )
 
-  rlog_results <- purrr::map(deseq_results, purrr::pluck, "rlog")
+  rlog_results <- purrr::map(deseq_results, \(x) x@rlog)
 
   message(sprintf("  Analysis complete for %d targeton(s)", length(deseq_results)))
 

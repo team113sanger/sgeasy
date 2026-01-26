@@ -43,6 +43,7 @@
 #' @importFrom grDevices png dev.off colorRampPalette
 #' @importFrom pheatmap pheatmap
 #' @importFrom RColorBrewer brewer.pal
+#' @importFrom cli cli_h1 cli_ul cli_text
 #' @import S7
 NULL
 

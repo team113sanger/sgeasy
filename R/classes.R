@@ -21,8 +21,6 @@ NULL
 #'   z-scores, and optional rate estimates.
 #' @param metadata A list of analysis metadata including condition levels,
 #'   shrinkage type, alpha threshold, and analysis timestamp.
-#' @param x An SGEResults object (for print method).
-#' @param ... Additional arguments (ignored).
 #'
 #' @details
 #' Access properties using the `@` operator:
@@ -96,13 +94,13 @@ S7::method(print, SGEResults) <- function(x, ...) {
     stringr::str_subset("^log2FoldChange_") |>
     stringr::str_remove("^log2FoldChange_")
 
-  cli::cli_h1("SGE Analysis Results")
-  cli::cli_ul(c(
+  cli_h1("SGE Analysis Results")
+  cli_ul(c(
     paste0("Variants: ", format(n_variants, big.mark = ",")),
     paste0("Samples: ", n_samples),
     paste0("Contrasts: ", length(contrasts))
   ))
-  cli::cli_text("")
-  cli::cli_text("Access data with {.code @results}, {.code @rlog}, {.code @contrast_summary}")
+  cli_text("")
+  cli_text("Access data with {.code @results}, {.code @rlog}, {.code @contrast_summary}")
   invisible(x)
 }

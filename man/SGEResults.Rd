@@ -37,6 +37,23 @@ SGEResults(
   metadata = list()
 )
 }
+\arguments{
+\item{results}{A data frame (tibble) containing DESeq2 results with a
+SEQUENCE column identifying each variant.}
+
+\item{rlog}{A DESeqTransform object containing regularized log-transformed
+counts for visualization.}
+
+\item{contrast_summary}{A data frame (tibble) containing combined summary
+statistics across all contrasts, including log2 fold changes, p-values,
+z-scores, and optional rate estimates.}
+
+\item{metadata}{A list of analysis metadata including condition levels,
+shrinkage type, alpha threshold, and analysis timestamp.}
+}
+\value{
+An S7 object of class SGEResults.
+}
 \description{
 An S7 class that holds results from SGE differential abundance analysis.
 }
@@ -49,23 +66,6 @@ Access properties using the \code{@} operator:
 \item \code{results@metadata} - Analysis parameters and timestamp
 }
 }
-\section{Slots}{
-
-\describe{
-\item{\code{results}}{A data frame (tibble) containing DESeq2 results with a
-SEQUENCE column identifying each variant.}
-
-\item{\code{rlog}}{A DESeqTransform object containing regularized log-transformed
-counts for visualization.}
-
-\item{\code{contrast_summary}}{A data frame (tibble) containing combined summary
-statistics across all contrasts, including log2 fold changes, p-values,
-z-scores, and optional rate estimates.}
-
-\item{\code{metadata}}{A list of analysis metadata including condition levels,
-shrinkage type, alpha threshold, and analysis timestamp.}
-}}
-
 \examples{
 \dontrun{
 # Run analysis (returns SGEResults object)

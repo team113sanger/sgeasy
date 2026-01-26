@@ -12,3 +12,5 @@
 ^\.gitlab-ci\.yml$
 ^Dockerfile$
 ^docker-compose\.yml$
+^doc$
+^Meta$

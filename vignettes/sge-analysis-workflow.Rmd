@@ -289,6 +289,25 @@ deseq_results <- map2(
 )
 ```
 
+Each element of `deseq_results` is an `SGEResults` S7 object. You can print
+any result to see a summary:
+
+```{r print-results}
+deseq_results[[1]]
+#> ── SGE Analysis Results ──
+#> • Variants: 12,345
+#> • Samples: 16
+#> • Contrasts: 3
+#>
+#> Access data with @results, @rlog, @contrast_summary
+```
+Access properties using the `@` operator:
+
+- `result@results` - DESeq2 results table
+- `result@rlog` - Regularized log-transformed data
+- `result@contrast_summary` - Combined contrast statistics
+- `result@metadata` - Analysis parameters (condition_levels, alpha, etc.)
+
 The `run_differential_analysis()` function:
 
 1. Estimates size factors from control variants
@@ -302,12 +321,13 @@ The `run_differential_analysis()` function:
 ### Combining Results
 
 Combine contrast tables from all targetons using `map_dfr` with `.id` to
-preserve targeton identity:
+preserve targeton identity. Use `@` to access the `contrast_summary` property
+from each `SGEResults` object:
 
 ```{r combine-results}
 contrast_tables <- map_dfr(
   deseq_results,
-  pluck, "contrast_summary",
+  \(x) x@contrast_summary,
   .id = "Targeton_ID"
 )
 ```
@@ -319,7 +339,8 @@ contrast_tables <- map_dfr(
 Visualize sample-to-sample distances to check for outliers and batch effects:
 
 ```{r distance-matrices}
-rlog_results <- map(deseq_results, pluck, "rlog")
+# Extract rlog data from each SGEResults object
+rlog_results <- map(deseq_results, \(x) x@rlog)
 
 dist_matrices <- map(rlog_results, sample_distance_matrix)
 plot_distance_matrices(dist_matrices, output_dir = "results/qc")

@@ -79,9 +79,12 @@ diff_abundance_analysis <- function(matrix, norm, screen_metadata){
   condition_data <- data.frame(condition = 
   screen_metadata$condition[match(colnames(matrix), 
                                   paste0("count_", screen_metadata$supplier_name))],
-                                  duration = screen_metadata$duration[match(colnames(matrix), 
+                                duration = screen_metadata$duration[match(colnames(matrix), 
+                                  paste0("count_", screen_metadata$supplier_name))],
+                                replicate = screen_metadata$replicate[match(colnames(matrix), 
                                   paste0("count_", screen_metadata$supplier_name))]
-) |> mutate(condition = factor(condition, levels = c("Day4", "Day7", "Day10", "Day15"))) 
+) |> 
+mutate(condition = factor(condition, levels = c("Day4", "Day7", "Day10", "Day15"))) 
 
     size_factors <- get_control_size_factors(norm, condition_data)
     dds <- DESeqDataSetFromMatrix(countData = matrix, 
@@ -90,9 +93,8 @@ diff_abundance_analysis <- function(matrix, norm, screen_metadata){
     dds <- estimateSizeFactors(dds)
 
 
-    logger::log_info("Running DESeq2 differential abundance analysis on continous data for Rate estimation")
     ## Update dds size factors with control size factors
-    sizeFactors(dds) <- size_factors[[1]]
+    sizeFactors(dds) <- size_factors
     dds <- DESeq(dds)
     rld <- rlog(dds)
     res <- results(dds) |> 
@@ -111,7 +113,10 @@ diff_abundance_analysis <- function(matrix, norm, screen_metadata){
 
     available_contrasts <- resultsNames(dds)[2:length(resultsNames(dds))]
     # Shirnkage type set to normal, apeglm would be better for RNASeq - but have selected no shrinkage is table
-    table_wald <- degComps(dds, combs = "condition", contrast = available_contrasts, alpha = 0.05, skip = FALSE, type = "normal", pairs = FALSE, fdr = "default")
+    table_wald <- degComps(dds, combs = "condition", 
+                            contrast = available_contrasts, 
+                            alpha = 0.05, skip = FALSE, type = "normal",
+                             pairs = FALSE, fdr = "default")
   
     first_contrast <- names(table_wald)[1]
 
@@ -127,25 +132,26 @@ diff_abundance_analysis <- function(matrix, norm, screen_metadata){
 
 
     # Continuous analysis 
+    logger::log_info("Running DESeq2 differential abundance analysis on continuous data for Rate estimation")
 
-    continous_size_factors <- get_control_size_factors(norm, 
+    continuous_size_factors <- get_control_size_factors(norm, 
                                 condition_data, 
                                 column_name = "duration", 
                                 ref = NULL)
-    continous_dds <- DESeqDataSetFromMatrix(countData = matrix, 
+    continuous_dds <- DESeqDataSetFromMatrix(countData = matrix, 
             colData = condition_data, 
             design = ~duration)
-    continous_dds <- estimateSizeFactors(continous_dds)
-    sizeFactors(continous_dds) <- continous_size_factors[[1]]
-    continous_dds <- DESeq(continous_dds)
-    wald_continuous <- degComps(continous_dds, 
+    continuous_dds <- estimateSizeFactors(continuous_dds)
+    sizeFactors(continuous_dds) <- continuous_size_factors
+    continuous_dds <- DESeq(continuous_dds, quiet=TRUE)
+    wald_continuous <- degComps(continuous_dds, 
                                 combs = "duration", alpha = 0.05, 
                                 skip = FALSE, type = "normal", 
                                 pairs = FALSE, fdr = "default")
     
-    rate <- wald_continuous[[1]] |> 
+    rate <- wald_continuous[["raw"]] |> 
     as_tibble(rownames = "SEQUENCE") |> 
-    rename_with(~paste0(.x, "_", "continous"), .cols = -SEQUENCE) |>
+    rename_with(~paste0(.x, "_", "continuous"), .cols = -SEQUENCE) |>
     dplyr::select(-starts_with("baseMean_"))
 
     all_contrast_summary <- left_join(all_contrast_summary, rate, by = "SEQUENCE")
@@ -191,7 +197,7 @@ calculate_median_scores <- function(df,
       ~ median(.x, na.rm = TRUE),
       .names = "median_{.col}"
     )) |> 
-    select(contains("median")) |> 
+    dplyr::select(contains("median")) |> 
     slice_head(n=1)
 
     df <- bind_cols(df, scores)
@@ -266,8 +272,8 @@ slim_consequence_fun <- function(df) {
           str_detect(Consequence, "inframe_deletion") & mutator == "custom" ~ "clinical_inframe_deletion",
           str_detect(Consequence, "inframe_insertion") & mutator == "custom" ~ "clinical_inframe_insertion",
           str_detect(Consequence, "stop_retained_variant") & mutator %in% c("snvre", "snv", "custom") ~ "synonymous",
-          str_detect(Consequence, "start_lost") & mutator %in% c("snvre", "snv", "custom", "ala") ~ "start_lost",
-          str_detect(Consequence, "stop_lost") & mutator %in% c("snvre", "snv", "custom", "ala") ~ "stop_lost",
+          str_detect(Consequence, "start_lost") & mutator %in% c("snvre", "snv", "custom", "ala","aa") ~ "start_lost",
+          str_detect(Consequence, "stop_lost") & mutator %in% c("snvre", "snv", "custom", "ala", "aa") ~ "stop_lost",
           str_detect(mutator, "inframe") ~ "codon_deletion",
 
           # Simple pattern matches
@@ -289,6 +295,8 @@ slim_consequence_fun <- function(df) {
   consequence_colours <- c(
     "synonymous" = "steelblue3",
     "stop_gained" = "firebrick2",
+    "stop_lost" = "purple3",
+    "start_lost" = "darkred",
     "missense" = "seagreen",
     "codon_deletion" = "orchid4",
     "frameshift" = "gold1",
@@ -354,7 +362,7 @@ recalculate_screen_statistics <- function(screen){
 }
 
 
-write_waterfall_plots <- function(plot_set, dest = "results"){
+write_waterfall_plots <- function(plot_set, dest = "results/screen"){
     dir.create(dest)
     plot_set |>
     list_flatten() |>
@@ -364,10 +372,149 @@ write_waterfall_plots <- function(plot_set, dest = "results"){
         dev.off()})
 }
 
-post_process <- function(dataframe, targeton_id, annotation_file){
+post_process <- function(dataframe, annotation_file){
     dataframe <- dataframe |>
-                mutate(Targeton_ID = targeton_id) |>
                 left_join(annotation_file, by = c("SEQUENCE" = "Seq", "Targeton_ID" = "Targeton_ID")) |>
                 recalculate_screen_statistics() |>
                 slim_consequence_fun()
+}
+
+
+plot_distance_matrices <- function(rlog_plots, dest = "results/qc/"){
+    dir.create(dest, recursive = TRUE)
+    iwalk(rlog_plots, ~ {
+        png(glue::glue("{dest}/{.y}_sample_distance_matrix.png"), width = 900, height = 600)
+        print(.x)
+        dev.off()})
+}
+
+plot_screen_pcas<- function(data, dest = 'results/qc') {
+    dir.create(dest, recursive = TRUE)
+    iwalk(data, ~ {
+        png(glue::glue("{dest}/{.y}_pca.png"), width = 900, height = 600)
+        print(.x)
+        dev.off()})}
+
+
+
+reweight_replicated_variants <- function(variant_set){
+weighted_results <- variant_set |>
+mutate(
+    # weight = 1 / (lfcSE_continuous)^2, # Variance-based weight
+    weight = if_else(is.na(pam_mut_sgrna_id), 1 / lfcSE_continuous^2, 0),
+    weighted_lfc = weight * adj_lfc_continuous
+  ) |>
+ungroup() |>
+group_by(HGVSc, HGVSp) |>
+summarise(
+    # Sum of weights and weighted LFCs
+    total_weight = sum(weight, na.rm = TRUE),
+    sum_weighted_lfc = sum(weighted_lfc, na.rm = TRUE),
+    
+    # Combined estimates
+    combined_lfc = sum_weighted_lfc / total_weight,
+    combined_SE = 1 / sqrt(total_weight),
+    
+    # Z-score and p-value
+    combined_Z = combined_lfc / combined_SE,
+    pval = pnorm(abs(combined_Z), lower.tail = FALSE) * 2,
+    
+    .groups = "drop"
+  ) |>
+mutate(
+    FDR = p.adjust(pval, method = "BH"),
+    functional_classification = case_when(
+      FDR < 0.01 & combined_lfc < 0 ~ "depleted",
+      FDR < 0.01 & combined_lfc > 0 ~ "enriched",
+      TRUE ~ "unchanged"
+    )
+  )
+return(weighted_results)
+}
+
+
+get_replicated_variants <- function(results){
+replicated_vars <- results |>
+group_by(HGVSc,HGVSp) |>
+summarise(n_observations = n()) |>
+filter(n_observations > 1) |>
+left_join(results, by = c("HGVSc", "HGVSp")) |> 
+ungroup()
+return(replicated_vars)
+}
+
+remove_artefacts <- function(annotated_counts){
+    dplyr::filter(annotated_counts, !is.na(sgRNA_id)) 
+}
+
+sampleDistMatrix <- function(rld_data){
+result <- as.matrix( dist( t( assay(rld_data) ) ) )
+pheatmap(result, trace="none", col=colorRampPalette(rev(brewer.pal(9, "Blues")) )(255), adjRow = c(1,1))
+}
+
+reweight_replicated_variants <- function(variant_set) {
+  
+  weighted_results <- variant_set |>
+    group_by(HGVSc, HGVSp) |>
+    mutate(
+      # Check if this variant has ANY non-PAM observations
+      has_non_pam = any(is.na(pam_mut_sgrna_id) | pam_mut_sgrna_id == ""),
+      
+      # Weight logic:
+      # - If non-PAM observations exist: zero-weight PAM, normal weight non-PAM
+      # - If ONLY PAM observations: use normal weight (better than nothing)
+      weight = case_when(
+        # Non-PAM observation → always use normal weight
+        is.na(pam_mut_sgrna_id) | pam_mut_sgrna_id == "" ~ 1 / lfcSE_continuous^2,
+        # PAM observation, but non-PAM alternatives exist → zero weight
+        has_non_pam ~ 0,
+        # PAM observation, no alternatives → use normal weight
+        TRUE ~ 1 / lfcSE_continuous^2
+      ),
+      
+      weighted_lfc = weight * adj_lfc_continuous
+    ) |>
+    summarise(
+      n_total = n(),
+      n_pam = sum(!is.na(pam_mut_sgrna_id) & pam_mut_sgrna_id != ""),
+      n_used = sum(weight > 0),
+      pam_only = all(!is.na(pam_mut_sgrna_id) & pam_mut_sgrna_id != ""),
+      
+      # Sum of weights and weighted LFCs
+      total_weight = sum(weight, na.rm = TRUE),
+      sum_weighted_lfc = sum(weighted_lfc, na.rm = TRUE),
+      
+      # Combined estimates
+      combined_lfc = sum_weighted_lfc / total_weight,
+      combined_SE = 1 / sqrt(total_weight),
+      
+      # Z-score and p-value
+      combined_Z = combined_lfc / combined_SE,
+      pval = pnorm(abs(combined_Z), lower.tail = FALSE) * 2,
+      
+      .groups = "drop"
+    ) |>
+    mutate(
+      FDR = p.adjust(pval, method = "BH"),
+      functional_classification = case_when(
+        FDR < 0.01 & combined_lfc < 0 ~ "depleted",
+        FDR < 0.01 & combined_lfc > 0 ~ "enriched",
+        TRUE ~ "unchanged"
+      )
+    )
+  
+  return(weighted_results)
+}
+
+
+build_sample_pca <- function(dataset) {
+pcaData <- plotPCA(dataset, intgroup=c("condition", "replicate"), returnData=TRUE)
+percentVar <- round(100 * attr(pcaData, "percentVar"))
+ident <- names(rlog_results)[1]
+pca <- ggplot(pcaData, aes(PC1, PC2, color=condition, shape = replicate)) +
+    geom_point(size=3) +
+    xlab(paste0("PC1: ",percentVar[1],"% variance")) +
+    ylab(paste0("PC2: ",percentVar[2],"% variance")) +
+    coord_fixed() +
+    theme_classic()
 }

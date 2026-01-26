@@ -28,7 +28,7 @@ analyze_screens(
 \value{
 A list containing:
 \describe{
-\item{deseq_results}{List of DESeq2 results by targeton}
+\item{deseq_results}{List of \link{SGEResults} objects by targeton}
 \item{contrast_tables}{Combined contrast table for all targetons}
 \item{rlog_results}{List of rlog-transformed data by targeton}
 }
