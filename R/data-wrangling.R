@@ -7,8 +7,8 @@
 #'   `Consequence` column and sample count columns.
 #' @param consequence_types Character vector of consequence types to include
 #'   (default: c("synonymous_variant", "intron_variant")).
-#' @param sample_pattern Regex pattern to identify sample columns
-#'   (default: "pel").
+#' @param sample_pattern Pattern to identify sample columns
+#'   (default: "count").
 #'
 #' @return A numeric matrix with variants as rows and samples as columns.
 #'   Row names are set to the SEQUENCE column values.
@@ -18,6 +18,10 @@
 #' (synonymous and intronic by default) which serve as controls for
 #' normalization. These variants are expected to have no functional effect
 #' and thus provide a baseline for estimating library size factors.
+#'
+#' The sample_pattern is used with `starts_with()` to select count columns.
+#' When using pivot_wider with `names_prefix = "count_"`, columns will be
+#' named like "count_SAMPLE_A_10_pel0000", and "count" will match these.
 #'
 #' @examples
 #' \dontrun{
@@ -31,10 +35,10 @@
 create_normalization_matrix <- function(data,
                                         consequence_types = c("synonymous_variant",
                                                               "intron_variant"),
-                                        sample_pattern = "pel") {
+                                        sample_pattern = "count") {
   data |>
     dplyr::filter(.data$Consequence %in% consequence_types) |>
-    dplyr::select("SEQUENCE", dplyr::contains(sample_pattern)) |>
+    dplyr::select("SEQUENCE", dplyr::starts_with(sample_pattern)) |>
     tibble::column_to_rownames("SEQUENCE") |>
     as.matrix()
 }
@@ -46,10 +50,15 @@ create_normalization_matrix <- function(data,
 #' suitable for differential analysis.
 #'
 #' @param data A data frame with SEQUENCE column and sample count columns.
-#' @param sample_pattern Regex pattern to identify sample columns
-#'   (default: "pel").
+#' @param sample_pattern Pattern to identify sample columns
+#'   (default: "count").
 #'
 #' @return A numeric matrix with sequences as row names and samples as columns.
+#'
+#' @details
+#' The sample_pattern is used with `starts_with()` to select count columns.
+#' When using pivot_wider with `names_prefix = "count_"`, columns will be
+#' named like "count_SAMPLE_A_10_pel0000", and "count" will match these.
 #'
 #' @examples
 #' \dontrun{
@@ -57,9 +66,9 @@ create_normalization_matrix <- function(data,
 #' }
 #'
 #' @export
-create_count_matrix <- function(data, sample_pattern = "pel") {
+create_count_matrix <- function(data, sample_pattern = "count") {
   data |>
-    dplyr::select("SEQUENCE", dplyr::contains(sample_pattern)) |>
+    dplyr::select("SEQUENCE", dplyr::starts_with(sample_pattern)) |>
     tibble::column_to_rownames("SEQUENCE") |>
     as.matrix()
 }
@@ -75,16 +84,16 @@ create_count_matrix <- function(data, sample_pattern = "pel") {
 #' @param max_counts Maximum total count to retain (default: Inf).
 #' @param exclude_pattern Pattern for columns to exclude from output
 #'   (default: "_0_"). Set to NULL to keep all columns.
-#' @param sample_pattern Regex pattern to identify sample columns for
-#'   count summation (default: "pel").
+#' @param sample_pattern Pattern to identify sample columns for
+#'   count summation (default: "count").
 #'
 #' @return Filtered data frame with variants meeting count criteria.
 #'
 #' @details
 #' This function calculates the total count for each variant across all
-#' sample columns matching `sample_pattern`, then filters to retain only
-#' variants within the specified count range. Optionally removes columns
-#' matching `exclude_pattern` (e.g., day 0 samples).
+#' sample columns matching `sample_pattern` using `starts_with()`, then
+#' filters to retain only variants within the specified count range.
+#' Optionally removes columns matching `exclude_pattern` (e.g., day 0 samples).
 #'
 #' @examples
 #' \dontrun{
@@ -100,11 +109,11 @@ filter_by_counts <- function(data,
                              min_counts = 10,
                              max_counts = Inf,
                              exclude_pattern = "_0_",
-                             sample_pattern = "pel") {
+                             sample_pattern = "count") {
   result <- data |>
     dplyr::rowwise() |>
     dplyr::mutate(
-      total_counts = sum(dplyr::across(dplyr::contains(sample_pattern)),
+      total_counts = sum(dplyr::across(dplyr::starts_with(sample_pattern)),
                          na.rm = TRUE)
     ) |>
     dplyr::filter(dplyr::between(.data$total_counts, min_counts, max_counts)) |>
@@ -158,9 +167,9 @@ slim_consequence <- function(data) {
         stringr::str_detect(.data$Consequence, "stop_retained_variant") &
           .data$mutator %in% c("snvre", "snv", "custom") ~ "synonymous",
         stringr::str_detect(.data$Consequence, "start_lost") &
-          .data$mutator %in% c("snvre", "snv", "custom", "ala") ~ "start_lost",
+          .data$mutator %in% c("snvre", "snv", "custom", "ala", "aa") ~ "start_lost",
         stringr::str_detect(.data$Consequence, "stop_lost") &
-          .data$mutator %in% c("snvre", "snv", "custom", "ala") ~ "stop_lost",
+          .data$mutator %in% c("snvre", "snv", "custom", "ala", "aa") ~ "stop_lost",
         stringr::str_detect(.data$mutator, "inframe") ~ "codon_deletion",
 
         # Simple pattern matches

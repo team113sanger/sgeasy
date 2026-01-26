@@ -9,7 +9,7 @@ filter_by_counts(
   min_counts = 10,
   max_counts = Inf,
   exclude_pattern = "_0_",
-  sample_pattern = "pel"
+  sample_pattern = "count"
 )
 }
 \arguments{
@@ -22,8 +22,8 @@ filter_by_counts(
 \item{exclude_pattern}{Pattern for columns to exclude from output
 (default: "\emph{0}"). Set to NULL to keep all columns.}
 
-\item{sample_pattern}{Regex pattern to identify sample columns for
-count summation (default: "pel").}
+\item{sample_pattern}{Pattern to identify sample columns for
+count summation (default: "count").}
 }
 \value{
 Filtered data frame with variants meeting count criteria.
@@ -34,9 +34,9 @@ optionally excludes specific sample patterns.
 }
 \details{
 This function calculates the total count for each variant across all
-sample columns matching \code{sample_pattern}, then filters to retain only
-variants within the specified count range. Optionally removes columns
-matching \code{exclude_pattern} (e.g., day 0 samples).
+sample columns matching \code{sample_pattern} using \code{starts_with()}, then
+filters to retain only variants within the specified count range.
+Optionally removes columns matching \code{exclude_pattern} (e.g., day 0 samples).
 }
 \examples{
 \dontrun{

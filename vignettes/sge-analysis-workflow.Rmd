@@ -16,21 +16,27 @@ knitr::opts_chunk$set(
 ```
 
 ## Introduction
+
 This vignette demonstrates a complete workflow for analyzing Saturation Genome
-Editing (SGE) screen data using the sgedown package. The workflow includes:
+Editing (SGE) screen data using the sgeasy package. The workflow includes:
 
 1. Reading and preparing count data
 2. Joining with sample metadata and variant annotations
-3. Normalizing using control variants (synonymous/intronic)
-4. Running differential abundance analysis with DESeq2
-5. Visualizing results
+3. Filtering and removing artefacts
+4. Normalizing using control variants (synonymous/intronic)
+5. Running differential abundance analysis with DESeq2
+6. Quality control visualization (distance matrices, PCA)
+7. Post-processing and statistical adjustment
+8. Gene-level analysis
+9. Reweighting replicated variants
+10. Visualization of results
 
 ## Setup
 
 Load the required packages:
 
 ```{r libraries, message=FALSE}
-library(sgedown)
+library(sgeasy)
 library(fs)
 library(readr)
 library(dplyr)
@@ -38,6 +44,8 @@ library(purrr)
 library(tidyr)
 library(pheatmap)
 library(RColorBrewer)
+library(ggplot2)
+library(glue)
 ```
 
 ## Data Import
@@ -46,17 +54,27 @@ library(RColorBrewer)
 
 SGE count data typically comes from multiple quantification files. Use `fs::dir_ls()`
 to find all count files:
+
 ```{r find-files}
 input_files <- fs::dir_ls(
-  "inputs/quants",
+  "inputs/run_51287",
+  type = "any",
   recurse = TRUE,
   glob = "*lib_counts.tsv.gz"
 )
 
-# Optionally filter files
+# Optionally filter files (e.g., exclude certain samples)
 input_files <- input_files[!grepl(input_files, pattern = "pel")]
 
-input_files
+# Add additional runs if needed
+added_files <- fs::dir_ls(
+  "inputs/run_47241",
+  recurse = TRUE,
+  glob = "*lib_counts.tsv.gz"
+)
+added_files <- added_files[!grepl(added_files, pattern = "mave-qc")]
+
+input_files <- c(input_files, added_files)
 ```
 
 Read all count files into a single dataset:
@@ -70,26 +88,11 @@ counts_dataset <- readr::read_tsv(input_files, comment = "##")
 Load the screen metadata containing sample information:
 
 ```{r load-metadata}
-screen_metadata <- readr::read_tsv("screen_metadata.tsv")
-```
+screen_metadata <- readr::read_tsv("metadata/screen_metadata.tsv")
 
-If you have additional reference data (e.g., EGXI screen data), you can join it:
-
-```{r join-reference, eval=FALSE}
-# Example: Adding EGXI reference data
-EGXI_data <- readr::read_tsv("path/to/EGXI_screen_quants.tsv")
-
-lookup <- EGXI_data |>
-  select(sequencing_id, supplier_name) |>
-  dplyr::rename(
-    SAMPLE = supplier_name,
-    supplier_name = sequencing_id
-  )
-
-counts_dataset <- counts_dataset |>
-  left_join(lookup, by = "SAMPLE") |>
-  mutate(SAMPLE = ifelse(!is.na(supplier_name), supplier_name, SAMPLE)) |>
-  select(-supplier_name)
+# Calculate duration from condition (e.g., "Day7" -> 7 - 4 = 3)
+screen_metadata <- screen_metadata |>
+  mutate(duration = as.numeric(str_remove(condition, pattern = "Day")) - 4)
 ```
 
 ## Data Preparation
@@ -112,7 +115,8 @@ exclude_samples <- c("SAMPLE_A_10_pel0000")  # Replace with actual sample names
 
 complete_dataset <- complete_dataset |>
   dplyr::filter(!supplier_name %in% exclude_samples) |>
-  dplyr::filter(!SAMPLE %in% exclude_samples)
+  dplyr::filter(!SAMPLE %in% exclude_samples) |>
+  dplyr::filter(targeton_id != "FRTW")  # Exclude specific targetons if needed
 ```
 
 ### Splitting by Targeton
@@ -123,11 +127,16 @@ If your data contains multiple targetons, split into separate datasets:
 targeton_matrices <- complete_dataset |>
   group_by(targeton_id) |>
   group_split()
+
+# Name each list element by targeton_id
+targeton_matrices <- targeton_matrices |>
+  purrr::set_names(map_chr(targeton_matrices, ~ unique(.x$targeton_id)))
 ```
 
 ### Creating Count Matrices
 
-Pivot the data to wide format with samples as columns:
+Pivot the data to wide format with samples as columns. **Important:** Use
+`names_prefix = "count_"` to prepend a prefix to sample column names:
 
 ```{r pivot-wide}
 count_matrices <- map(
@@ -135,6 +144,7 @@ count_matrices <- map(
   pivot_wider,
   names_from = "supplier_name",
   values_from = "COUNT",
+  names_prefix = "count_",
   id_cols = c("NAME", "SEQUENCE", "LENGTH", "targeton_id")
 )
 ```
@@ -185,6 +195,14 @@ annotated_counts <- map(
 )
 ```
 
+### Removing Artefacts
+
+Remove variants that lack valid sgRNA identifiers (artefacts):
+
+```{r remove-artefacts}
+annotated_counts <- map(annotated_counts, remove_artefacts)
+```
+
 ## Normalization
 
 ### Creating Normalization Matrices
@@ -233,80 +251,235 @@ The `run_differential_analysis()` function:
 4. Runs Wald tests for all condition contrasts
 5. Computes regularized log transformation
 6. Generates z-scores for visualization
+7. Runs continuous analysis for rate estimation
 
-### Accessing Results
+### Combining Results
 
-Each result is a named list:
+Combine contrast tables from all targetons using `map_dfr` with `.id` to
+preserve targeton identity:
 
-```{r access-results}
-# For the first targeton
-results <- deseq_results[[1]]
-
-# DESeq2 results table
-deseq_table <- results$results
-
-# rlog-transformed data for visualization
-rlog_data <- results$rlog
-
-# Multi-contrast summary with z-scores
-contrast_summary <- results$contrast_summary
+```{r combine-results}
+contrast_tables <- map_dfr(
+  deseq_results,
+  pluck, "contrast_summary",
+  .id = "Targeton_ID"
+)
 ```
+
+## Quality Control Visualization
+
+### Sample Distance Matrices
+
+Visualize sample-to-sample distances to check for outliers and batch effects:
+
+```{r distance-matrices}
+rlog_results <- map(deseq_results, pluck, "rlog")
+
+dist_matrices <- map(rlog_results, sample_distance_matrix)
+plot_distance_matrices(dist_matrices, output_dir = "results/qc")
+```
+
+### PCA Plots
+
+Create PCA plots to visualize sample clustering:
+
+```{r pca-plots}
+screen_pcas <- map(rlog_results, build_sample_pca)
+plot_screen_pcas(screen_pcas, output_dir = "results/qc")
+```
+
+## Post-Processing
+
+Apply post-processing to combine results with annotations, recalculate
+statistics, and classify variants:
+
+```{r post-process}
+recalculated_contrast_tables <- post_process(
+  data = contrast_tables,
+  annotation = master_annotation
+)
+```
+
+The `post_process()` function:
+
+1. Joins with the annotation file by SEQUENCE and Targeton_ID
+2. Calculates median log2FoldChange from neutral variants
+3. Adjusts all contrasts by subtracting medians and computing z-scores
+4. Classifies variants as depleted/enriched/unchanged based on FDR
+5. Simplifies consequence annotations
 
 ## Visualization
 
-### Quality Control Plots
+### Waterfall Plots by Targeton
 
-#### Dispersion Estimates
+Generate waterfall plots for each targeton and condition:
 
-Check the dispersion estimates from DESeq2:
+```{r waterfall-plots}
+individual_screens <- recalculated_contrast_tables |>
+  group_by(Targeton_ID) |>
+  group_split() |>
+  set_names(unique(recalculated_contrast_tables$Targeton_ID))
 
-```{r disp-plot, fig.width=6, fig.height=5}
-DESeq2::plotDispEsts(results$dds)
+plot_sets <- imap(
+  individual_screens,
+  ~ plot_all_conditions(.x, .y)
+)
+
+write_waterfall_plots(plot_sets, output_dir = "results/screen")
 ```
 
-#### Sample Distance Heatmap
+## Gene-Level Analysis
 
-Visualize sample similarity:
+For multi-exon genes, combine results across targetons:
 
-```{r heatmap, fig.width=8, fig.height=6}
-sample_dists <- dist(t(DESeq2::assay(results$rlog)))
-sample_dist_matrix <- as.matrix(sample_dists)
+### Adding Exon Annotations
 
-pheatmap::pheatmap(
-  sample_dist_matrix,
-  clustering_distance_rows = sample_dists,
-  clustering_distance_cols = sample_dists,
-  col = colorRampPalette(rev(RColorBrewer::brewer.pal(9, "Blues")))(255)
-)
+```{r exon-annotations}
+exon_annotations <- recalculated_contrast_tables |>
+  dplyr::select(Targeton_ID, EXON) |>
+  group_by(Targeton_ID) |>
+  slice_head(n = 1) |>
+  mutate(Exons = as.numeric(str_remove(EXON, pattern = "/6"))) |>
+  arrange(desc(Exons)) |>
+  dplyr::select(Targeton_ID, Exons) |>
+  ungroup() |>
+  mutate(Exons = factor(Exons, levels = c("6", "5", "4", "3", "2", "1")))
+
+gene_level_dataset <- recalculated_contrast_tables |>
+  left_join(exon_annotations, by = "Targeton_ID")
 ```
 
-### Sample Correlation Plots
+### Gene-Level Plot
 
-Use `plot_sample_scatter()` to compare replicates:
+Create a gene-level functional score plot faceted by exon:
 
-```{r scatter-plots, fig.width=8, fig.height=8}
-# Get samples grouped by condition
-sample_groups <- screen_metadata |>
-  group_by(targeton_id, condition) |>
-  select(supplier_name) |>
-  dplyr::filter(supplier_name %in% colnames(DESeq2::assay(results$rlog))) |>
-  group_split()
+```{r gene-level-plot}
+score_col <- "adj_lfc_continuous"
+class_col <- "functional_classification_continuous"
+fdr_col <- "FDR_continuous"
+gene_id <- "MYGENE"
 
-sample_group_lists <- map(sample_groups, ~ pull(.x, supplier_name))
+gene_level <- ggplot(gene_level_dataset, aes(
+  x = vcf_pos,
+  y = .data[[score_col]],
+  shape = .data[[class_col]],
+  colour = slim_consequence,
+  fill = slim_consequence
+)) +
+  geom_point(aes(alpha = .data[[fdr_col]] <= 0.01), size = 1.5) +
+  scale_colour_manual(values = consequence_colours) +
+  scale_fill_manual(values = consequence_colours) +
+  scale_shape_manual(values = classification_shapes) +
+  scale_alpha_discrete(labels = c("FDR > 0.01", "FDR <= 0.01")) +
+  xlab("GRCh38 coordinate") +
+  ylab("Functional score (Adjusted LFC)") +
+  ggtitle(paste("Functional score Plot:", gene_id)) +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1,
+                               colour = "black", size = 10),
+    legend.title = element_blank(),
+    legend.position = "right",
+    legend.box = "vertical",
+    legend.margin = margin()
+  ) +
+  facet_wrap(~ Exons, scales = "free_x", nrow = 1)
 
-# Plot each group
-scatter_plots <- map(
-  sample_group_lists,
-  ~ plot_sample_scatter(results$rlog, .x)
-)
+ggsave("results/gene_level_plot.png", gene_level,
+       width = 25, height = 6, units = "in", dpi = 300)
+```
+
+## Reweighting Replicated Variants
+
+Some variants may be represented by multiple oligos. Use inverse variance
+weighting to combine these measurements:
+
+### Preparing Results for Reweighting
+
+```{r prep-reweight}
+results <- gene_level_dataset |>
+  select(Targeton_ID, SEQUENCE, HGVSc, HGVSp, pam_mut_sgrna_id,
+         contains("continuous"))
+```
+
+### Finding Replicated Variants
+
+```{r find-replicates}
+replicated_variants <- get_replicated_variants(results)
+replicated_variants
+```
+
+### Applying Inverse Variance Weighting
+
+```{r reweight}
+reweighted_variants <- reweight_replicated_variants(results)
+```
+
+The reweighting strategy:
+
+- Non-PAM observations receive weight = 1/SE^2
+- PAM-impacted observations receive zero weight if non-PAM alternatives exist
+- PAM-only variants use normal weighting (better than nothing)
+
+### Comparing Classifications
+
+Check how reweighting affects classifications:
+
+```{r compare-classifications}
+reweighted_variants |>
+  select(HGVSc, HGVSp, functional_classification) |>
+  left_join(results, by = c("HGVSc", "HGVSp")) |>
+  select(HGVSc, HGVSp, functional_classification,
+         functional_classification_continuous) |>
+  filter(functional_classification != functional_classification_continuous)
+```
+
+### Weighted Score Plot
+
+```{r weighted-plot}
+combined_dataset <- reweighted_variants |>
+  left_join(gene_level_dataset, by = c("HGVSc", "HGVSp"))
+
+weighted_scores <- ggplot(combined_dataset, aes(
+  x = vcf_pos,
+  y = combined_lfc,
+  shape = functional_classification,
+  colour = slim_consequence,
+  fill = slim_consequence
+)) +
+  geom_point(aes(alpha = FDR <= 0.01), size = 1.5) +
+  scale_colour_manual(values = consequence_colours) +
+  scale_fill_manual(values = consequence_colours) +
+  scale_shape_manual(values = classification_shapes) +
+  scale_alpha_discrete(labels = c("FDR > 0.01", "FDR <= 0.01")) +
+  xlab("GRCh38 coordinate") +
+  ylab("Functional score (Weighted LFC)") +
+  ggtitle(paste("Functional score Plot:", gene_id, "- Weighted LFC")) +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1,
+                               colour = "black", size = 10),
+    legend.title = element_blank(),
+    legend.position = "right",
+    legend.box = "vertical",
+    legend.margin = margin()
+  ) +
+  facet_wrap(~ Exons, scales = "free_x", nrow = 1)
+
+ggsave("results/gene_level_plot_reweight.png", weighted_scores,
+       width = 25, height = 6, units = "in", dpi = 300)
 ```
 
 ## Exporting Results
 
-Save the contrast summary to a file:
+Save the final results:
 
-```{r export, eval=FALSE}
-readr::write_tsv(results$contrast_summary, "DEG_summary.tsv")
+```{r export}
+# Gene-level weighted scores
+combined_dataset |>
+  select(HGVSc, HGVSp, combined_lfc, functional_classification, FDR) |>
+  left_join(results, by = c("HGVSc", "HGVSp")) |>
+  write_tsv("results/gene_level_weighted_scores.tsv")
 ```
 
 ## Session Info

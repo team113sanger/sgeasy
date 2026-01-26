@@ -7,7 +7,7 @@
 create_normalization_matrix(
   data,
   consequence_types = c("synonymous_variant", "intron_variant"),
-  sample_pattern = "pel"
+  sample_pattern = "count"
 )
 }
 \arguments{
@@ -17,8 +17,8 @@ create_normalization_matrix(
 \item{consequence_types}{Character vector of consequence types to include
 (default: c("synonymous_variant", "intron_variant")).}
 
-\item{sample_pattern}{Regex pattern to identify sample columns
-(default: "pel").}
+\item{sample_pattern}{Pattern to identify sample columns
+(default: "count").}
 }
 \value{
 A numeric matrix with variants as rows and samples as columns.
@@ -33,6 +33,10 @@ This function filters the input data to retain only neutral variants
 (synonymous and intronic by default) which serve as controls for
 normalization. These variants are expected to have no functional effect
 and thus provide a baseline for estimating library size factors.
+
+The sample_pattern is used with \code{starts_with()} to select count columns.
+When using pivot_wider with \code{names_prefix = "count_"}, columns will be
+named like "count_SAMPLE_A_10_pel0000", and "count" will match these.
 }
 \examples{
 \dontrun{

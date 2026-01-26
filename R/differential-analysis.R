@@ -16,6 +16,8 @@
 #' @param alpha Significance threshold for adjusted p-values (default: 0.05).
 #' @param include_rate Logical; whether to include continuous rate analysis
 #'   (default: TRUE).
+#' @param sample_prefix Prefix used for sample column names in the count matrix
+#'   (default: "count_"). Set to "" if column names match supplier_name directly.
 #'
 #' @return A named list containing:
 #'   \describe{
@@ -64,16 +66,23 @@ run_differential_analysis <- function(count_matrix,
                                                            "Day10", "Day15"),
                                       shrinkage_type = "normal",
                                       alpha = 0.05,
-                                      include_rate = TRUE) {
+                                      include_rate = TRUE,
+                                      sample_prefix = "count_") {
   message("Running DESeq2 differential abundance analysis on timepoint contrasts")
 
   # Build condition data for samples in the count matrix
+  # Match column names to metadata by prepending the sample_prefix
+  sample_names_lookup <- paste0(sample_prefix, sample_metadata$supplier_name)
+
   condition_data <- data.frame(
     condition = sample_metadata$condition[
-      match(colnames(count_matrix), sample_metadata$supplier_name)
+      match(colnames(count_matrix), sample_names_lookup)
     ],
     duration = sample_metadata$duration[
-      match(colnames(count_matrix), sample_metadata$supplier_name)
+      match(colnames(count_matrix), sample_names_lookup)
+    ],
+    replicate = sample_metadata$replicate[
+      match(colnames(count_matrix), sample_names_lookup)
     ]
   )
   condition_data$condition <- factor(
@@ -461,9 +470,12 @@ recalculate_screen_statistics <- function(data, fdr_threshold = 0.01) {
 #' statistical adjustments, and simplifies consequence types.
 #'
 #' @param data A data frame with contrast results from differential analysis.
-#' @param targeton_id Character string identifying the targeton.
+#'   If `Targeton_ID` column already exists (e.g., from using `map_dfr` with
+#'   `.id = "Targeton_ID"`), this will be used for joining.
 #' @param annotation A data frame with variant annotations. Must contain
 #'   `Seq` and `Targeton_ID` columns for joining.
+#' @param targeton_id Optional character string identifying the targeton.
+#'   Only used if `Targeton_ID` column doesn't exist in data.
 #' @param fdr_threshold FDR threshold for functional classification
 #'   (default: 0.01).
 #'
@@ -473,17 +485,33 @@ recalculate_screen_statistics <- function(data, fdr_threshold = 0.01) {
 #' @details
 #' This function provides a complete post-processing pipeline:
 #' \enumerate{
-#'   \item Adds the targeton identifier to the data
+#'   \item Adds the targeton identifier to the data (if not already present)
 #'   \item Joins with the annotation file by SEQUENCE and Targeton_ID
 #'   \item Applies [recalculate_screen_statistics()] for statistical adjustment
 #'   \item Applies [slim_consequence()] for consequence simplification
 #' }
 #'
+#' The function supports two workflows:
+#' \itemize{
+#'   \item Single targeton: provide `targeton_id` parameter
+#'   \item Multiple targetons: use `map_dfr(..., .id = "Targeton_ID")` pattern
+#'     and `Targeton_ID` will already be in the data
+#' }
+#'
 #' @examples
 #' \dontrun{
+#' # Single targeton workflow
 #' processed <- post_process(
 #'   data = contrast_summary,
-#'   targeton_id = "GENE1_exon2",
+#'   annotation = vep_annotations,
+#'   targeton_id = "GENE1_exon2"
+#' )
+#'
+#' # Multiple targeton workflow (Targeton_ID already in data)
+#' contrast_tables <- map_dfr(deseq_results, pluck, "contrast_summary",
+#'                            .id = "Targeton_ID")
+#' processed <- post_process(
+#'   data = contrast_tables,
 #'   annotation = vep_annotations
 #' )
 #' }
@@ -491,15 +519,168 @@ recalculate_screen_statistics <- function(data, fdr_threshold = 0.01) {
 #' @seealso [recalculate_screen_statistics()], [slim_consequence()]
 #' @export
 post_process <- function(data,
-                         targeton_id,
                          annotation,
+                         targeton_id = NULL,
                          fdr_threshold = 0.01) {
+  # Add Targeton_ID if not present and targeton_id is provided
+ if (!"Targeton_ID" %in% names(data)) {
+    if (is.null(targeton_id)) {
+      stop("Targeton_ID column not found in data and targeton_id not provided")
+    }
+    data <- dplyr::mutate(data, Targeton_ID = targeton_id)
+  }
+
   data |>
-    dplyr::mutate(Targeton_ID = targeton_id) |>
     dplyr::left_join(
       annotation,
       by = c("SEQUENCE" = "Seq", "Targeton_ID" = "Targeton_ID")
     ) |>
     recalculate_screen_statistics(fdr_threshold = fdr_threshold) |>
     slim_consequence()
+}
+
+
+#' Remove artefact variants
+#'
+#' Filters out variants that lack a valid sgRNA identifier, which typically
+#' indicates artefact sequences that should be excluded from analysis.
+#'
+#' @param data A data frame with an `sgRNA_id` column.
+#'
+#' @return Data frame with artefact rows (NA sgRNA_id) removed.
+#'
+#' @examples
+#' \dontrun{
+#' cleaned_data <- remove_artefacts(annotated_counts)
+#' }
+#'
+#' @export
+remove_artefacts <- function(data) {
+  dplyr::filter(data, !is.na(.data$sgRNA_id))
+}
+
+
+#' Find replicated variants
+#'
+#' Identifies variants that have multiple observations (e.g., from different
+#' oligos targeting the same HGVSc/HGVSp variant).
+#'
+#' @param data A data frame with `HGVSc` and `HGVSp` columns.
+#'
+#' @return Data frame containing only variants with more than one observation,
+#'   with an `n_observations` column indicating how many times each variant
+#'   appears.
+#'
+#' @examples
+#' \dontrun{
+#' replicated <- get_replicated_variants(results)
+#' }
+#'
+#' @export
+get_replicated_variants <- function(data) {
+  data |>
+    dplyr::group_by(.data$HGVSc, .data$HGVSp) |>
+    dplyr::summarise(n_observations = dplyr::n(), .groups = "drop") |>
+    dplyr::filter(.data$n_observations > 1) |>
+    dplyr::left_join(data, by = c("HGVSc", "HGVSp"))
+}
+
+
+#' Reweight replicated variants using inverse variance weighting
+#'
+#' Combines measurements from replicated variants (same HGVSc/HGVSp) using
+#' inverse variance weighting. PAM-impacted observations are down-weighted
+#' when non-PAM alternatives exist.
+#'
+#' @param data A data frame with `HGVSc`, `HGVSp`, `pam_mut_sgrna_id`,
+#'   `lfcSE_continuous`, and `adj_lfc_continuous` columns.
+#' @param fdr_threshold FDR threshold for functional classification
+#'   (default: 0.01).
+#'
+#' @return Data frame with one row per unique HGVSc/HGVSp combination,
+#'   containing:
+#'   \describe{
+#'     \item{HGVSc, HGVSp}{Variant identifiers}
+#'     \item{n_total}{Total number of observations}
+#'     \item{n_pam}{Number of PAM-impacted observations}
+#'     \item{n_used}{Number of observations used (weight > 0)}
+#'     \item{pam_only}{Logical; TRUE if only PAM observations exist}
+#'     \item{combined_lfc}{Weighted average log fold change}
+#'     \item{combined_SE}{Standard error of combined estimate}
+#'     \item{combined_Z}{Z-score of combined estimate}
+#'     \item{pval}{Two-sided p-value}
+#'     \item{FDR}{Benjamini-Hochberg adjusted p-value}
+#'     \item{functional_classification}{depleted/enriched/unchanged}
+#'   }
+#'
+#' @details
+#' The weighting strategy prioritizes non-PAM observations:
+#' \itemize{
+#'   \item Non-PAM observations always receive weight = 1/SE^2
+#'   \item PAM observations receive zero weight if non-PAM alternatives exist
+#'   \item PAM-only variants use normal weighting (better than nothing)
+#' }
+#'
+#' @examples
+#' \dontrun{
+#' weighted_results <- reweight_replicated_variants(variant_data)
+#' }
+#'
+#' @export
+reweight_replicated_variants <- function(data, fdr_threshold = 0.01) {
+  weighted_results <- data |>
+    dplyr::group_by(.data$HGVSc, .data$HGVSp) |>
+    dplyr::mutate(
+      # Check if this variant has ANY non-PAM observations
+      has_non_pam = any(is.na(.data$pam_mut_sgrna_id) |
+                          .data$pam_mut_sgrna_id == ""),
+
+      # Weight logic:
+      # - If non-PAM observations exist: zero-weight PAM, normal weight non-PAM
+      # - If ONLY PAM observations: use normal weight (better than nothing)
+      weight = dplyr::case_when(
+        # Non-PAM observation -> always use normal weight
+        is.na(.data$pam_mut_sgrna_id) |
+          .data$pam_mut_sgrna_id == "" ~ 1 / .data$lfcSE_continuous^2,
+        # PAM observation, but non-PAM alternatives exist -> zero weight
+        .data$has_non_pam ~ 0,
+        # PAM observation, no alternatives -> use normal weight
+        TRUE ~ 1 / .data$lfcSE_continuous^2
+      ),
+
+      weighted_lfc = .data$weight * .data$adj_lfc_continuous
+    ) |>
+    dplyr::summarise(
+      n_total = dplyr::n(),
+      n_pam = sum(!is.na(.data$pam_mut_sgrna_id) &
+                    .data$pam_mut_sgrna_id != ""),
+      n_used = sum(.data$weight > 0),
+      pam_only = all(!is.na(.data$pam_mut_sgrna_id) &
+                       .data$pam_mut_sgrna_id != ""),
+
+      # Sum of weights and weighted LFCs
+      total_weight = sum(.data$weight, na.rm = TRUE),
+      sum_weighted_lfc = sum(.data$weighted_lfc, na.rm = TRUE),
+
+      # Combined estimates
+      combined_lfc = .data$sum_weighted_lfc / .data$total_weight,
+      combined_SE = 1 / sqrt(.data$total_weight),
+
+      # Z-score and p-value
+      combined_Z = .data$combined_lfc / .data$combined_SE,
+      pval = stats::pnorm(abs(.data$combined_Z), lower.tail = FALSE) * 2,
+
+      .groups = "drop"
+    ) |>
+    dplyr::mutate(
+      FDR = stats::p.adjust(.data$pval, method = "BH"),
+      functional_classification = dplyr::case_when(
+        .data$FDR < fdr_threshold & .data$combined_lfc < 0 ~ "depleted",
+        .data$FDR < fdr_threshold & .data$combined_lfc > 0 ~ "enriched",
+        TRUE ~ "unchanged"
+      )
+    ) |>
+    dplyr::select(-"total_weight", -"sum_weighted_lfc")
+
+  return(weighted_results)
 }

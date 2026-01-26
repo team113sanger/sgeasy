@@ -10,7 +10,9 @@ run_differential_analysis(
   sample_metadata,
   condition_levels = c("Day4", "Day7", "Day10", "Day15"),
   shrinkage_type = "normal",
-  alpha = 0.05
+  alpha = 0.05,
+  include_rate = TRUE,
+  sample_prefix = "count_"
 )
 }
 \arguments{
@@ -21,7 +23,7 @@ row names and samples as columns.}
 estimation (e.g., synonymous/intronic variants).}
 
 \item{sample_metadata}{Data frame with sample information. Must contain
-\code{condition} and \code{supplier_name} columns.}
+\code{condition}, \code{duration}, and \code{supplier_name} columns.}
 
 \item{condition_levels}{Character vector specifying condition factor levels
 in order (default: c("Day4", "Day7", "Day10", "Day15")).}
@@ -30,6 +32,12 @@ in order (default: c("Day4", "Day7", "Day10", "Day15")).}
 (default: "normal").}
 
 \item{alpha}{Significance threshold for adjusted p-values (default: 0.05).}
+
+\item{include_rate}{Logical; whether to include continuous rate analysis
+(default: TRUE).}
+
+\item{sample_prefix}{Prefix used for sample column names in the count matrix
+(default: "count_"). Set to "" if column names match supplier_name directly.}
 }
 \value{
 A named list containing:
@@ -37,7 +45,7 @@ A named list containing:
 \item{results}{DESeq2 results table as a tibble with SEQUENCE column}
 \item{rlog}{Regularized log-transformed DESeqDataSet object}
 \item{contrast_summary}{Combined summary across all contrasts including
-log2 fold changes, p-values, and z-scores for each sample}
+log2 fold changes, p-values, z-scores, and rate estimates}
 }
 }
 \description{
@@ -54,6 +62,7 @@ This function implements the full SGE differential abundance pipeline:
 \item Runs DESeq2 Wald tests for all condition contrasts
 \item Computes regularized log transformation for visualization
 \item Generates z-scores across samples for each variant
+\item Optionally runs continuous analysis for rate estimation
 }
 
 The control-based normalization strategy accounts for differences in

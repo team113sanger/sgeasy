@@ -1,4 +1,4 @@
-Package: sgedown
+Package: sgeasy
 Title: Downstream Analysis for Saturation Genome Editing Screens
 Version: 0.1.0
 Authors@R: c(
@@ -22,17 +22,18 @@ Imports:
     dplyr (>= 1.0.0),
     GGally,
     ggplot2 (>= 3.4.0),
+    pheatmap,
     purrr,
+    RColorBrewer,
     rlang,
+    stringr,
     SummarizedExperiment,
     tibble,
     tidyr
 Suggests:
     fs,
     knitr,
-    pheatmap,
     pkgdown,
-    RColorBrewer,
     readr,
     rmarkdown,
     testthat (>= 3.0.0)

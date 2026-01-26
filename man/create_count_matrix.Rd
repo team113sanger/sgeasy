@@ -4,13 +4,13 @@
 \alias{create_count_matrix}
 \title{Create count matrix from annotated data}
 \usage{
-create_count_matrix(data, sample_pattern = "pel")
+create_count_matrix(data, sample_pattern = "count")
 }
 \arguments{
 \item{data}{A data frame with SEQUENCE column and sample count columns.}
 
-\item{sample_pattern}{Regex pattern to identify sample columns
-(default: "pel").}
+\item{sample_pattern}{Pattern to identify sample columns
+(default: "count").}
 }
 \value{
 A numeric matrix with sequences as row names and samples as columns.
@@ -18,6 +18,11 @@ A numeric matrix with sequences as row names and samples as columns.
 \description{
 Extracts sequence identifiers and sample counts into a numeric matrix
 suitable for differential analysis.
+}
+\details{
+The sample_pattern is used with \code{starts_with()} to select count columns.
+When using pivot_wider with \code{names_prefix = "count_"}, columns will be
+named like "count_SAMPLE_A_10_pel0000", and "count" will match these.
 }
 \examples{
 \dontrun{

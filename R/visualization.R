@@ -110,7 +110,8 @@ plot_sample_scatter <- function(data,
 consequence_colours <- c(
   "synonymous" = "steelblue3",
   "stop_gained" = "firebrick2",
-
+  "stop_lost" = "purple3",
+  "start_lost" = "darkred",
   "missense" = "seagreen",
   "codon_deletion" = "orchid4",
   "frameshift" = "gold1",
@@ -134,7 +135,7 @@ consequence_colours <- c(
 classification_shapes <- c(
   "unchanged" = 0,
   "depleted" = 6,
-  "enriched" = 2
+  "enriched" = 3
 )
 
 
@@ -287,6 +288,197 @@ write_waterfall_plots <- function(plot_list,
       print(.x)
       grDevices::dev.off()
     })
+
+  invisible(NULL)
+}
+
+
+#' Create sample distance matrix heatmap
+#'
+#' Computes a sample-to-sample distance matrix from regularized log-transformed
+#' data and displays it as a heatmap.
+#'
+#' @param rlog_data A DESeqTransform object (output from `DESeq2::rlog()`)
+#'   or a matrix of transformed counts.
+#' @param color_palette Color palette for the heatmap. Default uses reversed
+#'   Blues palette.
+#'
+#' @return A pheatmap object (invisibly). The heatmap is also printed.
+#'
+#' @examples
+#' \dontrun{
+#' sample_distance_matrix(results$rlog)
+#' }
+#'
+#' @export
+sample_distance_matrix <- function(rlog_data,
+                                   color_palette = NULL) {
+  if (inherits(rlog_data, "DESeqTransform")) {
+    mat <- SummarizedExperiment::assay(rlog_data)
+  } else {
+    mat <- rlog_data
+  }
+
+  if (is.null(color_palette)) {
+    color_palette <- grDevices::colorRampPalette(
+      rev(RColorBrewer::brewer.pal(9, "Blues"))
+    )(255)
+  }
+
+  dist_matrix <- as.matrix(stats::dist(t(mat)))
+
+  p <- pheatmap::pheatmap(
+    dist_matrix,
+    trace = "none",
+    col = color_palette,
+    silent = TRUE
+  )
+
+  print(p)
+  invisible(p)
+}
+
+
+#' Build PCA plot from rlog data
+#'
+#' Creates a PCA plot from regularized log-transformed data, colored by
+#' condition and shaped by replicate.
+#'
+#' @param rlog_data A DESeqTransform object (output from `DESeq2::rlog()`).
+#' @param intgroup Character vector of variables to use for grouping
+#'   (default: c("condition", "replicate")).
+#' @param point_size Size of points in the plot (default: 3).
+#'
+#' @return A ggplot object.
+#'
+#' @examples
+#' \dontrun{
+#' pca_plot <- build_sample_pca(results$rlog)
+#' }
+#'
+#' @export
+build_sample_pca <- function(rlog_data,
+                             intgroup = c("condition", "replicate"),
+                             point_size = 3) {
+  pca_data <- DESeq2::plotPCA(rlog_data, intgroup = intgroup, returnData = TRUE)
+  percent_var <- round(100 * attr(pca_data, "percentVar"))
+
+  # Build aesthetic mapping based on available intgroup variables
+  if (length(intgroup) >= 2 && all(intgroup %in% names(pca_data))) {
+    p <- ggplot2::ggplot(
+      pca_data,
+      ggplot2::aes(
+        x = .data$PC1,
+        y = .data$PC2,
+        color = .data[[intgroup[1]]],
+        shape = .data[[intgroup[2]]]
+      )
+    )
+  } else if (length(intgroup) >= 1 && intgroup[1] %in% names(pca_data)) {
+    p <- ggplot2::ggplot(
+      pca_data,
+      ggplot2::aes(
+        x = .data$PC1,
+        y = .data$PC2,
+        color = .data[[intgroup[1]]]
+      )
+    )
+  } else {
+    p <- ggplot2::ggplot(
+      pca_data,
+      ggplot2::aes(x = .data$PC1, y = .data$PC2)
+    )
+  }
+
+  p +
+    ggplot2::geom_point(size = point_size) +
+    ggplot2::xlab(paste0("PC1: ", percent_var[1], "% variance")) +
+    ggplot2::ylab(paste0("PC2: ", percent_var[2], "% variance")) +
+    ggplot2::coord_fixed() +
+    ggplot2::theme_classic()
+}
+
+
+#' Save distance matrix plots to files
+#'
+#' Saves multiple sample distance matrix heatmaps to PNG files.
+#'
+#' @param rlog_list A named list of DESeqTransform objects or matrices.
+#' @param output_dir Directory to save plots (default: "results/qc").
+#' @param width Plot width in pixels (default: 900).
+#' @param height Plot height in pixels (default: 600).
+#'
+#' @return Invisibly returns NULL. Side effect: writes PNG files.
+#'
+#' @examples
+#' \dontrun{
+#' rlog_results <- map(deseq_results, pluck, "rlog")
+#' dist_matrices <- map(rlog_results, sample_distance_matrix)
+#' plot_distance_matrices(dist_matrices, output_dir = "results/qc")
+#' }
+#'
+#' @export
+plot_distance_matrices <- function(rlog_list,
+                                   output_dir = "results/qc",
+                                   width = 900,
+                                   height = 600) {
+  if (!dir.exists(output_dir)) {
+    dir.create(output_dir, recursive = TRUE)
+  }
+
+  purrr::iwalk(rlog_list, ~ {
+    grDevices::png(
+      file.path(output_dir, paste0(.y, "_sample_distance_matrix.png")),
+      width = width,
+      height = height
+    )
+    sample_distance_matrix(.x)
+    grDevices::dev.off()
+  })
+
+  invisible(NULL)
+}
+
+
+#' Save PCA plots to files
+#'
+#' Saves multiple sample PCA plots to PNG files.
+#'
+#' @param rlog_list A named list of DESeqTransform objects.
+#' @param output_dir Directory to save plots (default: "results/qc").
+#' @param width Plot width in pixels (default: 900).
+#' @param height Plot height in pixels (default: 600).
+#' @param intgroup Character vector of variables to use for grouping
+#'   (default: c("condition", "replicate")).
+#'
+#' @return Invisibly returns NULL. Side effect: writes PNG files.
+#'
+#' @examples
+#' \dontrun{
+#' rlog_results <- map(deseq_results, pluck, "rlog")
+#' plot_screen_pcas(rlog_results, output_dir = "results/qc")
+#' }
+#'
+#' @export
+plot_screen_pcas <- function(rlog_list,
+                             output_dir = "results/qc",
+                             width = 900,
+                             height = 600,
+                             intgroup = c("condition", "replicate")) {
+  if (!dir.exists(output_dir)) {
+    dir.create(output_dir, recursive = TRUE)
+  }
+
+  purrr::iwalk(rlog_list, ~ {
+    grDevices::png(
+      file.path(output_dir, paste0(.y, "_pca.png")),
+      width = width,
+      height = height
+    )
+    pca_plot <- build_sample_pca(.x, intgroup = intgroup)
+    print(pca_plot)
+    grDevices::dev.off()
+  })
 
   invisible(NULL)
 }

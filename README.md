@@ -1,4 +1,4 @@
-# sgedown
+# sgeasy
 
 Downstream analysis tools for Saturation Genome Editing (SGE) screens.
 
@@ -6,7 +6,7 @@ Downstream analysis tools for Saturation Genome Editing (SGE) screens.
 
 ```r
 # Install from GitHub (when available)
-# devtools::install_github("your-org/sgedown")
+# devtools::install_github("your-org/sgeasy")
 
 # Or install locally
 devtools::install()
@@ -22,7 +22,7 @@ sgedown provides a complete workflow for analyzing SGE screen data:
 ## Quick Start
 
 ```r
-library(sgedown)
+library(sgeasy)
 
 # Create normalization matrix from neutral variants
 norm_matrix <- create_normalization_matrix(annotated_data)
