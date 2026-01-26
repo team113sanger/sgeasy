@@ -38,11 +38,12 @@
 #' @importFrom ggplot2 ggplot aes geom_point geom_smooth theme element_text
 #' @importFrom ggplot2 xlab ylab coord_fixed theme_classic
 #' @importFrom GGally ggpairs wrap
-#' @importFrom rlang .data
+#' @importFrom rlang .data :=
 #' @importFrom stats as.formula relevel pnorm p.adjust dist
 #' @importFrom grDevices png dev.off colorRampPalette
 #' @importFrom pheatmap pheatmap
 #' @importFrom RColorBrewer brewer.pal
+#' @import S7
 NULL
 
 # Suppress R CMD check notes for NSE variables

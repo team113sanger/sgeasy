@@ -18,7 +18,53 @@ knitr::opts_chunk$set(
 ## Introduction
 
 This vignette demonstrates a complete workflow for analyzing Saturation Genome
-Editing (SGE) screen data using the sgeasy package. The workflow includes:
+Editing (SGE) screen data using the sgeasy package.
+
+### Quick Start with Stage Wrappers
+
+For a streamlined workflow, use the stage wrapper functions:
+
+```{r quick-start, eval=FALSE}
+library(sgeasy)
+
+# Stage 1: Load data
+data <- load_sge_data(
+  count_files = "inputs/",
+  metadata_file = "metadata/screen_metadata.tsv"
+)
+
+# Stage 2: Prepare matrices
+matrices <- prepare_count_matrices(
+  complete_dataset = data$complete_dataset,
+  annotation = data$annotation,
+  exclude_samples = c("bad_sample"),
+  min_counts = 10
+)
+
+# Stage 3: Run analysis
+results <- analyze_screens(
+  complete_matrices = matrices$complete_matrices,
+  normalisation_matrices = matrices$normalisation_matrices,
+  metadata = data$metadata
+)
+
+# Stage 4: Generate QC plots
+generate_qc_plots(
+  rlog_results = results$rlog_results,
+  output_dir = "results/qc"
+)
+
+# Stage 5: Generate results
+final <- generate_results(
+  contrast_tables = results$contrast_tables,
+  annotation = data$annotation,
+  output_dir = "results"
+)
+```
+
+### Detailed Workflow
+
+The following sections provide a more detailed explanation of each step. The workflow includes:
 
 1. Reading and preparing count data
 2. Joining with sample metadata and variant annotations

@@ -19,12 +19,17 @@
 #' @param sample_prefix Prefix used for sample column names in the count matrix
 #'   (default: "count_"). Set to "" if column names match supplier_name directly.
 #'
-#' @return A named list containing:
+#' @return An [SGEResults] object containing:
 #'   \describe{
-#'     \item{results}{DESeq2 results table as a tibble with SEQUENCE column}
-#'     \item{rlog}{Regularized log-transformed DESeqDataSet object}
+#'     \item{results}{DESeq2 results table as a tibble with SEQUENCE column
+#'       (access via `@results`)}
+#'     \item{rlog}{Regularized log-transformed DESeqDataSet object
+#'       (access via `@rlog`)}
 #'     \item{contrast_summary}{Combined summary across all contrasts including
-#'       log2 fold changes, p-values, z-scores, and rate estimates}
+#'       log2 fold changes, p-values, z-scores, and rate estimates
+#'       (access via `@contrast_summary`)}
+#'     \item{metadata}{Analysis parameters including condition_levels,
+#'       shrinkage_type, alpha, and analysis_date (access via `@metadata`)}
 #'   }
 #'
 #' @details
@@ -51,10 +56,11 @@
 #'   sample_metadata = metadata
 #' )
 #'
-#' # Access components
-#' deseq_results <- results$results
-#' rlog_data <- results$rlog
-#' summary_table <- results$contrast_summary
+#' # Access components using @
+#' deseq_results <- results@results
+#' rlog_data <- results@rlog
+#' summary_table <- results@contrast_summary
+#' analysis_params <- results@metadata
 #' }
 #'
 #' @seealso [estimate_size_factors()], [create_normalization_matrix()]
@@ -202,11 +208,17 @@ run_differential_analysis <- function(count_matrix,
     )
   }
 
-  # Return named list
-  list(
+  # Return SGEResults object
+ SGEResults(
     results = res,
     rlog = rld,
-    contrast_summary = all_contrast_summary
+    contrast_summary = all_contrast_summary,
+    metadata = list(
+      condition_levels = condition_levels,
+      shrinkage_type = shrinkage_type,
+      alpha = alpha,
+      analysis_date = Sys.time()
+    )
   )
 }
 

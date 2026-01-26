@@ -17,6 +17,7 @@ RoxygenNote: 7.3.3
 Depends:
     R (>= 4.1.0)
 Imports:
+    cli,
     DESeq2 (>= 1.36.0),
     DEGreport,
     dplyr (>= 1.0.0),
@@ -26,6 +27,7 @@ Imports:
     purrr,
     RColorBrewer,
     rlang,
+    S7 (>= 0.2.0),
     stringr,
     SummarizedExperiment,
     tibble,

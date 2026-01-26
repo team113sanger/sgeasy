@@ -40,12 +40,17 @@ in order (default: c("Day4", "Day7", "Day10", "Day15")).}
 (default: "count_"). Set to "" if column names match supplier_name directly.}
 }
 \value{
-A named list containing:
+An \link{SGEResults} object containing:
 \describe{
-\item{results}{DESeq2 results table as a tibble with SEQUENCE column}
-\item{rlog}{Regularized log-transformed DESeqDataSet object}
+\item{results}{DESeq2 results table as a tibble with SEQUENCE column
+(access via \verb{@results})}
+\item{rlog}{Regularized log-transformed DESeqDataSet object
+(access via \verb{@rlog})}
 \item{contrast_summary}{Combined summary across all contrasts including
-log2 fold changes, p-values, z-scores, and rate estimates}
+log2 fold changes, p-values, z-scores, and rate estimates
+(access via \verb{@contrast_summary})}
+\item{metadata}{Analysis parameters including condition_levels,
+shrinkage_type, alpha, and analysis_date (access via \verb{@metadata})}
 }
 }
 \description{
@@ -76,10 +81,11 @@ results <- run_differential_analysis(
   sample_metadata = metadata
 )
 
-# Access components
-deseq_results <- results$results
-rlog_data <- results$rlog
-summary_table <- results$contrast_summary
+# Access components using @
+deseq_results <- results@results
+rlog_data <- results@rlog
+summary_table <- results@contrast_summary
+analysis_params <- results@metadata
 }
 
 }
