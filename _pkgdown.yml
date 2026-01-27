@@ -9,6 +9,22 @@ navbar:
     right: [search, github]
 
 reference:
+  - title: "Workflow Facades"
+    desc: "High-level functions for streamlined analysis"
+    contents:
+      - load_sge_data
+      - prepare_count_matrices
+      - analyze_screens
+      - generate_qc_plots
+      - generate_results
+      - prepare_gene_level_data
+
+  - title: "Classes"
+    desc: "S7 class definitions for SGE data structures"
+    contents:
+      - SGEData
+      - SGEResults
+
   - title: "Normalization"
     desc: "Size factor estimation from control data"
     contents:
@@ -21,16 +37,36 @@ reference:
       - create_normalization_matrix
       - create_count_matrix
       - filter_by_counts
+      - slim_consequence
+      - remove_artefacts
 
   - title: "Differential Analysis"
-    desc: "DESeq2-based differential abundance"
+    desc: "DESeq2-based differential abundance and post-processing"
     contents:
       - run_differential_analysis
+      - post_process
+      - recalculate_screen_statistics
+      - calculate_median_scores
+      - adjust_all_contrasts
+      - classify_all_contrasts
+      - classify_variants
+      - get_replicated_variants
+      - reweight_replicated_variants
 
   - title: "Visualization"
     desc: "Plotting functions"
     contents:
+      - plot_gene_level
+      - plot_condition_scores
+      - plot_all_conditions
+      - write_waterfall_plots
       - plot_sample_scatter
+      - sample_distance_matrix
+      - plot_distance_matrices
+      - build_sample_pca
+      - plot_screen_pcas
+      - consequence_colours
+      - classification_shapes
 
 articles:
   - title: "Getting Started"

@@ -542,3 +542,134 @@ generate_results <- function(contrast_tables,
     plots = plots
   )
 }
+
+
+#' Prepare gene-level dataset from targeton results
+#'
+#' Combines results from multiple targetons (exons) into a single gene-level
+#' dataset suitable for visualization and aggregated analysis.
+#'
+#' @param data A data frame of processed contrast results containing
+#'   `Targeton_ID` and `EXON` columns.
+#' @param exon_col Column name containing exon information (default: "EXON").
+#' @param exon_pattern Regex pattern to extract exon number from exon_col
+
+#'   (default: "/\\d+$" removes denominator like "/6" from "1/6").
+#' @param exon_levels Character vector of exon factor levels for ordering.
+#'   If NULL, levels are determined automatically in descending order.
+#' @param reweight Logical; whether to compute reweighted scores for
+#'   replicated variants across the gene (default: TRUE).
+#' @param fdr_threshold FDR threshold for functional classification in
+#'   reweighted results (default: 0.01).
+#'
+#' @return A list containing:
+#'   \describe{
+#'     \item{gene_data}{Data frame with all variants and an `Exons` factor
+#'       column for faceting}
+#'     \item{exon_annotations}{Data frame mapping Targeton_ID to Exons}
+#'     \item{reweighted}{Data frame of reweighted variant scores (if
+#'       reweight = TRUE), or NULL}
+#'     \item{combined}{Gene data joined with reweighted scores (if
+#'       reweight = TRUE), or NULL}
+#'   }
+#'
+#' @examples
+#' \dontrun{
+#' # Basic usage
+#' gene_results <- prepare_gene_level_data(processed_contrast_tables)
+#'
+#' # Access components
+#' gene_results$gene_data       # For plotting individual variants
+#' gene_results$reweighted      # Aggregated scores per unique variant
+#' gene_results$combined        # Combined for weighted score plots
+#'
+#' # Custom exon ordering
+#' gene_results <- prepare_gene_level_data(
+#'   data = processed_data,
+#'   exon_levels = c("6", "5", "4", "3", "2", "1")
+#' )
+#' }
+#'
+#' @export
+prepare_gene_level_data <- function(data,
+                                    exon_col = "EXON",
+                                    exon_pattern = "/\\d+$",
+                                    exon_levels = NULL,
+                                    reweight = TRUE,
+                                    fdr_threshold = 0.01) {
+  logger::log_info("Preparing gene-level dataset...")
+
+ # Create exon annotations
+  logger::log_debug("Extracting exon annotations...")
+  exon_annotations <- data |>
+    dplyr::select("Targeton_ID", dplyr::all_of(exon_col)) |>
+    dplyr::group_by(.data$Targeton_ID) |>
+    dplyr::slice_head(n = 1) |>
+    dplyr::ungroup() |>
+    dplyr::mutate(
+      Exons = as.numeric(stringr::str_remove(.data[[exon_col]], exon_pattern))
+    ) |>
+    dplyr::arrange(dplyr::desc(.data$Exons))
+
+  # Set factor levels
+  if (is.null(exon_levels)) {
+    exon_levels <- as.character(sort(unique(exon_annotations$Exons),
+                                      decreasing = TRUE))
+  }
+  exon_annotations <- exon_annotations |>
+    dplyr::mutate(Exons = factor(.data$Exons, levels = exon_levels)) |>
+    dplyr::select("Targeton_ID", "Exons")
+
+  n_exons <- length(unique(exon_annotations$Exons))
+  logger::log_debug("Found {n_exons} exon(s)")
+
+  # Join to create gene-level dataset
+  gene_data <- data |>
+    dplyr::left_join(exon_annotations, by = "Targeton_ID")
+
+  logger::log_debug("Gene dataset contains {nrow(gene_data)} variants")
+
+  # Reweight replicated variants if requested
+  reweighted <- NULL
+  combined <- NULL
+
+  if (reweight) {
+    required_cols <- c("HGVSc", "HGVSp", "pam_mut_sgrna_id",
+                       "lfcSE_continuous", "adj_lfc_continuous")
+    has_required <- all(required_cols %in% names(data))
+
+    if (has_required) {
+      logger::log_debug("Reweighting replicated variants...")
+
+      reweight_input <- gene_data |>
+        dplyr::select(
+          "Targeton_ID", "SEQUENCE", "HGVSc", "HGVSp",
+          "pam_mut_sgrna_id", dplyr::contains("continuous")
+        )
+
+      reweighted <- reweight_replicated_variants(
+        reweight_input,
+        fdr_threshold = fdr_threshold
+      )
+
+      logger::log_debug("Reweighted to {nrow(reweighted)} unique variants")
+
+      # Create combined dataset
+      combined <- reweighted |>
+        dplyr::left_join(gene_data, by = c("HGVSc", "HGVSp"))
+
+    } else {
+      missing <- setdiff(required_cols, names(data))
+      logger::log_warn("Cannot reweight: missing columns {paste(missing, collapse = ', ')}")
+    }
+  }
+
+  logger::log_info("Gene-level data preparation complete")
+
+  list(
+    gene_data = gene_data,
+    exon_annotations = exon_annotations,
+    reweighted = reweighted,
+    combined = combined
+  )
+}

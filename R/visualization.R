@@ -482,3 +482,109 @@ plot_screen_pcas <- function(rlog_list,
 
   invisible(NULL)
 }
+
+
+#' Plot gene-level functional scores
+#'
+#' Creates a gene-level plot showing functional scores across all exons,
+#' with variants colored by consequence type and shaped by functional
+#' classification. Supports both raw and reweighted scores.
+#'
+#' @param data A data frame from [prepare_gene_level_data()]. Use
+#'   `$gene_data` for raw scores or `$combined` for reweighted scores.
+#' @param gene_id Gene identifier for the plot title.
+#' @param score_col Column name for the score to plot. For raw data use
+#'   e.g. "adj_lfc_continuous"; for reweighted use "combined_lfc".
+#' @param class_col Column name for functional classification. For raw data
+#'   use e.g. "functional_classification_continuous"; for reweighted use
+#'   "functional_classification".
+#' @param fdr_col Column name for FDR values. For raw data use
+#'   e.g. "FDR_continuous"; for reweighted use "FDR".
+#' @param score_label Label for the y-axis (default: "Functional score").
+#' @param fdr_threshold FDR threshold for alpha transparency (default: 0.01).
+#' @param colours Named vector of colors for slim_consequence values
+#'   (default: [consequence_colours]).
+#' @param shapes Named vector of shapes for functional_classification values
+#'   (default: [classification_shapes]).
+#' @param point_size Size of points (default: 1.5).
+#' @param facet_nrow Number of rows for exon faceting (default: 1).
+#'
+#' @return A ggplot object.
+#'
+#' @examples
+#' \dontrun{
+#' gene_results <- prepare_gene_level_data(processed_data)
+#'
+#' # Plot raw scores
+#' plot_gene_level(
+#'   data = gene_results$gene_data,
+#'   gene_id = "BRCA1",
+#'   score_col = "adj_lfc_continuous",
+#'   class_col = "functional_classification_continuous",
+#'   fdr_col = "FDR_continuous",
+#'   score_label = "Adjusted LFC"
+#' )
+#'
+#' # Plot reweighted scores
+#' plot_gene_level(
+#'   data = gene_results$combined,
+#'   gene_id = "BRCA1",
+#'   score_col = "combined_lfc",
+#'   class_col = "functional_classification",
+#'   fdr_col = "FDR",
+#'   score_label = "Weighted LFC"
+#' )
+#' }
+#'
+#' @seealso [prepare_gene_level_data()]
+#' @export
+plot_gene_level <- function(data,
+                            gene_id,
+                            score_col,
+                            class_col,
+                            fdr_col,
+                            score_label = "Functional score",
+                            fdr_threshold = 0.01,
+                            colours = consequence_colours,
+                            shapes = classification_shapes,
+                            point_size = 1.5,
+                            facet_nrow = 1) {
+  ggplot2::ggplot(
+    data,
+    ggplot2::aes(
+      x = .data$vcf_pos,
+      y = .data[[score_col]],
+      shape = .data[[class_col]],
+      colour = .data$slim_consequence,
+      fill = .data$slim_consequence
+    )
+  ) +
+    ggplot2::geom_point(
+      ggplot2::aes(alpha = .data[[fdr_col]] <= fdr_threshold),
+      size = point_size
+    ) +
+    ggplot2::scale_colour_manual(values = colours) +
+    ggplot2::scale_fill_manual(values = colours) +
+    ggplot2::scale_shape_manual(values = shapes) +
+    ggplot2::scale_alpha_discrete(
+      labels = c(
+        paste0("FDR > ", fdr_threshold),
+        paste0("FDR <= ", fdr_threshold)
+      )
+    ) +
+    ggplot2::xlab("GRCh38 coordinate") +
+    ggplot2::ylab(score_label) +
+    ggplot2::ggtitle(paste("Functional score:", gene_id)) +
+    ggplot2::theme_classic() +
+    ggplot2::theme(
+      axis.text.x = ggplot2::element_text(
+        angle = 90, vjust = 0.5, hjust = 1,
+        colour = "black", size = 10
+      ),
+      legend.title = ggplot2::element_blank(),
+      legend.position = "right",
+      legend.box = "vertical",
+      legend.margin = ggplot2::margin()
+    ) +
+    ggplot2::facet_wrap(~ Exons, scales = "free_x", nrow = facet_nrow)
+}
