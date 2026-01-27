@@ -64,7 +64,13 @@ pages:
   script:
     - echo "*** [SCRIPT] Building pkgdown site ***"
     - docker pull "${CANDIDATE_IMAGE}"
-    - docker run --rm -v "${CI_PROJECT_DIR}:/workspace" -w /workspace "${CANDIDATE_IMAGE}" Rscript -e "options(repos = BiocManager::repositories()); devtools::install('.'); pkgdown::build_site()"
+    - |
+      docker run --rm -v "${CI_PROJECT_DIR}:/workspace" -w /workspace "${CANDIDATE_IMAGE}" Rscript -e "
+        options(repos = c(CRAN = 'https://cloud.r-project.org', BiocManager::repositories()))
+        install.packages(c('devtools', 'pkgdown'))
+        devtools::install('.')
+        pkgdown::build_site()
+      "
     - mv docs public
     - echo "*** [SCRIPT] Site built and ready for deployment ***"
   artifacts:
