@@ -53,7 +53,8 @@ load_sge_data <- function(count_files,
                           exclude_patterns = NULL,
                           metadata_join_by = "sequencing_id",
                           calculate_duration = TRUE) {
-  message("Loading SGE data...")
+
+  logger::log_info("Loading SGE data...")
 
   # Find count files if directory provided
   if (length(count_files) == 1 && dir.exists(count_files)) {
@@ -72,15 +73,18 @@ load_sge_data <- function(count_files,
     }
   }
 
-  message(sprintf("  Found %d count files", length(count_files)))
+
+  logger::log_debug("Found {length(count_files)} count files")
 
   # Read counts
   counts <- readr::read_tsv(count_files, comment = "##", show_col_types = FALSE)
-  message(sprintf("  Loaded %d rows of count data", nrow(counts)))
+
+  logger::log_debug("Loaded {nrow(counts)} rows of count data")
 
   # Read metadata
   metadata <- readr::read_tsv(metadata_file, show_col_types = FALSE)
-  message(sprintf("  Loaded %d rows of metadata", nrow(metadata)))
+
+  logger::log_debug("Loaded {nrow(metadata)} rows of metadata")
 
   # Calculate duration if requested
   if (calculate_duration && "condition" %in% names(metadata)) {
@@ -95,20 +99,23 @@ load_sge_data <- function(count_files,
   # Get annotation file from metadata if not provided
   if (is.null(annotation_file) && "vep_anno" %in% names(metadata)) {
     annotation_file <- unique(metadata$vep_anno)[1]
-    message(sprintf("  Using annotation file from metadata: %s", annotation_file))
+
+    logger::log_debug("Using annotation file from metadata: {annotation_file}")
   }
 
   # Read annotation
   annotation <- NULL
   if (!is.null(annotation_file) && file.exists(annotation_file)) {
     annotation <- readr::read_tsv(annotation_file, show_col_types = FALSE)
-    message(sprintf("  Loaded %d rows of annotation data", nrow(annotation)))
+
+    logger::log_debug("Loaded {nrow(annotation)} rows of annotation data")
   }
 
   # Join counts with metadata
   join_spec <- stats::setNames("SAMPLE", metadata_join_by)
   complete_dataset <- dplyr::left_join(counts, metadata, by = join_spec)
-  message(sprintf("  Created complete dataset with %d rows", nrow(complete_dataset)))
+
+  logger::log_debug("Created complete dataset with {nrow(complete_dataset)} rows")
 
   SGEData(
     counts = counts,
@@ -172,7 +179,8 @@ prepare_count_matrices <- function(data,
                                    sample_col = "supplier_name",
                                    count_col = "COUNT",
                                    targeton_col = "targeton_id") {
-  message("Preparing count matrices...")
+
+  logger::log_info("Preparing count matrices...")
 
   # Extract from SGEData if provided
  if (inherits(data, "sgeasy::SGEData")) {
@@ -189,18 +197,20 @@ prepare_count_matrices <- function(data,
     complete_dataset <- complete_dataset |>
       dplyr::filter(!.data[[sample_col]] %in% exclude_samples) |>
       dplyr::filter(!.data$SAMPLE %in% exclude_samples)
-    message(sprintf("  Excluded %d sample(s)", length(exclude_samples)))
+
+    logger::log_debug("Excluded {length(exclude_samples)} sample(s)")
   }
 
   # Filter targetons
   if (!is.null(exclude_targetons)) {
     complete_dataset <- complete_dataset |>
       dplyr::filter(!.data[[targeton_col]] %in% exclude_targetons)
-    message(sprintf("  Excluded %d targeton(s)", length(exclude_targetons)))
+
+    logger::log_debug("Excluded {length(exclude_targetons)} targeton(s)")
   }
 
   # Split by targeton
-  message("  Splitting by targeton...")
+  logger::log_debug("Splitting by targeton...")
   targeton_matrices <- complete_dataset |>
     dplyr::group_by(.data[[targeton_col]]) |>
     dplyr::group_split()
@@ -210,10 +220,11 @@ prepare_count_matrices <- function(data,
     ~ unique(.x[[targeton_col]])
   )
   targeton_matrices <- purrr::set_names(targeton_matrices, targeton_ids)
-  message(sprintf("  Found %d targeton(s)", length(targeton_ids)))
+
+  logger::log_debug("Found {length(targeton_ids)} targeton(s)")
 
   # Pivot to wide format
-  message("  Pivoting to wide format...")
+  logger::log_debug("Pivoting to wide format...")
   count_matrices <- purrr::map(
     targeton_matrices,
     ~ tidyr::pivot_wider(
@@ -226,7 +237,7 @@ prepare_count_matrices <- function(data,
   )
 
   # Deduplicate
-  message("  Deduplicating sequences...")
+  logger::log_debug("Deduplicating sequences...")
   unique_matrices <- purrr::map(
     count_matrices,
     ~ dplyr::group_by(.x, .data$SEQUENCE) |>
@@ -235,7 +246,7 @@ prepare_count_matrices <- function(data,
   )
 
   # Filter by counts
-  message(sprintf("  Filtering by minimum counts >= %d...", min_counts))
+  logger::log_debug("Filtering by minimum counts >= {min_counts}...")
   filtered_matrices <- purrr::map(
     unique_matrices,
     filter_by_counts,
@@ -244,7 +255,7 @@ prepare_count_matrices <- function(data,
 
   # Join annotations
   if (!is.null(annotation)) {
-    message("  Joining annotations...")
+    logger::log_debug("Joining annotations...")
     annotated_counts <- purrr::map(
       filtered_matrices,
       ~ dplyr::left_join(
@@ -255,26 +266,28 @@ prepare_count_matrices <- function(data,
     )
 
     # Remove artefacts
-    message("  Removing artefacts...")
+    logger::log_debug("Removing artefacts...")
     annotated_counts <- purrr::map(annotated_counts, remove_artefacts)
   } else {
     annotated_counts <- filtered_matrices
   }
 
   # Create matrices
-  message("  Creating normalization matrices...")
+  logger::log_debug("Creating normalization matrices...")
   normalisation_matrices <- purrr::map(
     annotated_counts,
     create_normalization_matrix
   )
 
-  message("  Creating complete matrices...")
+
+  logger::log_debug("Creating complete matrices...")
   complete_matrices <- purrr::map(
     annotated_counts,
     create_count_matrix
   )
 
-  message("  Done preparing count matrices")
+
+  logger::log_info("Done preparing count matrices")
 
   list(
     annotated_counts = annotated_counts,
@@ -329,7 +342,8 @@ analyze_screens <- function(complete_matrices,
                             metadata,
                             condition_levels = c("Day4", "Day7", "Day10", "Day15"),
                             ...) {
-  message("Running differential analysis...")
+
+  logger::log_info("Running differential analysis...")
 
   # Extract metadata from SGEData if provided
   if (inherits(metadata, "sgeasy::SGEData")) {
@@ -345,7 +359,8 @@ analyze_screens <- function(complete_matrices,
     ...
   )
 
-  message("  Combining contrast tables...")
+
+  logger::log_debug("Combining contrast tables...")
   contrast_tables <- purrr::map_dfr(
     deseq_results,
     \(x) x@contrast_summary,
@@ -354,7 +369,8 @@ analyze_screens <- function(complete_matrices,
 
   rlog_results <- purrr::map(deseq_results, \(x) x@rlog)
 
-  message(sprintf("  Analysis complete for %d targeton(s)", length(deseq_results)))
+
+  logger::log_info("Analysis complete for {length(deseq_results)} targeton(s)")
 
   list(
     deseq_results = deseq_results,
@@ -391,23 +407,25 @@ generate_qc_plots <- function(rlog_results,
                               output_dir = "results/qc",
                               create_distance_matrices = TRUE,
                               create_pca_plots = TRUE) {
-  message("Generating QC plots...")
+
+  logger::log_info("Generating QC plots...")
 
   plots <- list()
 
   if (create_distance_matrices) {
-    message("  Creating distance matrices...")
+    logger::log_debug("Creating distance matrices...")
     plots$distance <- purrr::map(rlog_results, sample_distance_matrix)
     plot_distance_matrices(rlog_results, output_dir = output_dir)
   }
 
   if (create_pca_plots) {
-    message("  Creating PCA plots...")
+    logger::log_debug("Creating PCA plots...")
     plots$pca <- purrr::map(rlog_results, build_sample_pca)
     plot_screen_pcas(rlog_results, output_dir = output_dir)
   }
 
-  message(sprintf("  QC plots saved to: %s", output_dir))
+
+  logger::log_info("QC plots saved to: {output_dir}")
   invisible(plots)
 }
 
@@ -448,10 +466,11 @@ generate_results <- function(contrast_tables,
                              create_waterfall_plots = TRUE,
                              reweight_replicates = TRUE,
                              fdr_threshold = 0.01) {
-  message("Generating results...")
+
+  logger::log_info("Generating results...")
 
   # Post-process
-  message("  Post-processing contrast tables...")
+  logger::log_debug("Post-processing contrast tables...")
   processed_data <- post_process(
     data = contrast_tables,
     annotation = annotation,
@@ -462,7 +481,7 @@ generate_results <- function(contrast_tables,
 
   # Create waterfall plots
   if (create_waterfall_plots) {
-    message("  Creating waterfall plots...")
+    logger::log_debug("Creating waterfall plots...")
     individual_screens <- processed_data |>
       dplyr::group_by(.data$Targeton_ID) |>
       dplyr::group_split() |>
@@ -483,7 +502,8 @@ generate_results <- function(contrast_tables,
   reweighted_data <- NULL
   if (reweight_replicates &&
       all(c("HGVSc", "HGVSp", "pam_mut_sgrna_id") %in% names(processed_data))) {
-    message("  Reweighting replicated variants...")
+
+    logger::log_debug("Reweighting replicated variants...")
     reweight_input <- processed_data |>
       dplyr::select(
         "Targeton_ID", "SEQUENCE", "HGVSc", "HGVSp",
@@ -493,7 +513,8 @@ generate_results <- function(contrast_tables,
       reweight_input,
       fdr_threshold = fdr_threshold
     )
-    message(sprintf("    Reweighted %d unique variants", nrow(reweighted_data)))
+
+    logger::log_debug("Reweighted {nrow(reweighted_data)} unique variants")
   }
 
   # Save results
@@ -505,7 +526,8 @@ generate_results <- function(contrast_tables,
     processed_data,
     file.path(output_dir, "processed_contrast_tables.tsv")
   )
-  message(sprintf("  Results saved to: %s", output_dir))
+
+  logger::log_info("Results saved to: {output_dir}")
 
   if (!is.null(reweighted_data)) {
     readr::write_tsv(
