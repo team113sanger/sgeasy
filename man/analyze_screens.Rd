@@ -18,7 +18,8 @@ analyze_screens(
 \item{normalisation_matrices}{List of normalization matrices from
 \code{prepare_count_matrices()}.}
 
-\item{metadata}{Sample metadata data frame.}
+\item{metadata}{Sample metadata data frame, or an \link{SGEData} object from
+which the metadata will be extracted.}
 
 \item{condition_levels}{Character vector of condition factor levels
 (default: c("Day4", "Day7", "Day10", "Day15")).}
@@ -39,10 +40,18 @@ count matrices.
 }
 \examples{
 \dontrun{
+# Using SGEData object
 results <- analyze_screens(
   complete_matrices = matrices$complete_matrices,
   normalisation_matrices = matrices$normalisation_matrices,
-  metadata = data$metadata
+  metadata = sge_data
+)
+
+# Using metadata data frame directly
+results <- analyze_screens(
+  complete_matrices = matrices$complete_matrices,
+  normalisation_matrices = matrices$normalisation_matrices,
+  metadata = metadata_df
 )
 }
 

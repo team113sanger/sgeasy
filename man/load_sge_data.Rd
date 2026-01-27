@@ -36,12 +36,12 @@ column in counts (default: "sequencing_id").}
 condition column (default: TRUE).}
 }
 \value{
-A list containing:
+An \link{SGEData} object containing:
 \describe{
-\item{counts}{The raw count data frame}
-\item{metadata}{The sample metadata data frame}
-\item{annotation}{The variant annotation data frame}
-\item{complete_dataset}{Counts joined with metadata}
+\item{counts}{The raw count data frame (access via \verb{@counts})}
+\item{metadata}{The sample metadata data frame (access via \verb{@metadata})}
+\item{annotation}{The variant annotation data frame (access via \verb{@annotation})}
+\item{complete_dataset}{Counts joined with metadata (access via \verb{@complete_dataset})}
 }
 }
 \description{

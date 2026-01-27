@@ -1,12 +1,106 @@
 #' S7 Class Definitions for sgeasy
 #'
 #' @description
-#' S7 class definitions for SGE analysis results. The `SGEResults` class
-#' provides a formal container for differential analysis output with
-#' validation and a clean print method.
+#' S7 class definitions for SGE analysis data and results. These classes
+#' provide formal containers with validation and clean print methods for
+#' an improved REPL experience.
 #'
 #' @name sgeasy-classes
 NULL
+
+
+#' SGEData Class
+#'
+#' An S7 class that holds loaded SGE screen data before analysis.
+#'
+#' @param counts A data frame of raw count data with SEQUENCE and SAMPLE columns.
+#' @param metadata A data frame of sample metadata with condition information.
+#' @param annotation A data frame of variant annotations (optional, can be NULL).
+#' @param complete_dataset A data frame of counts joined with metadata.
+#'
+#' @details
+#' Access properties using the `@` operator:
+#' \itemize{
+#'   \item `data@counts` - Raw count data
+#'   \item `data@metadata` - Sample metadata
+#'   \item `data@annotation` - Variant annotations (may be NULL)
+#'   \item `data@complete_dataset` - Counts joined with metadata
+#' }
+#'
+#' @return An S7 object of class SGEData.
+#'
+#' @examples
+#' \dontrun{
+#' # Load data (returns SGEData object)
+#' data <- load_sge_data(
+#'   count_files = "inputs/",
+#'   metadata_file = "metadata/screen_metadata.tsv"
+#' )
+#'
+#' # Print shows summary
+#' data
+#'
+#' # Access properties
+#' data@counts
+#' data@metadata
+#' data@annotation
+#' data@complete_dataset
+#' }
+#'
+#' @export
+SGEData <- S7::new_class(
+ "SGEData",
+  properties = list(
+    counts = S7::class_data.frame,
+    metadata = S7::class_data.frame,
+    annotation = S7::new_property(
+      class = S7::class_any,
+      default = NULL,
+      validator = function(value) {
+        if (!is.null(value) && !is.data.frame(value)) {
+          return("annotation must be a data frame or NULL")
+        }
+        NULL
+      }
+    ),
+    complete_dataset = S7::class_data.frame
+  ),
+  validator = function(self) {
+    if (!"SEQUENCE" %in% names(self@counts)) {
+      return("counts must contain a SEQUENCE column")
+    }
+    if (!"SAMPLE" %in% names(self@counts)) {
+      return("counts must contain a SAMPLE column")
+    }
+    if (!"condition" %in% names(self@metadata)) {
+      return("metadata must contain a condition column")
+    }
+    if (!is.null(self@annotation) && !"Seq" %in% names(self@annotation)) {
+      return("annotation must contain a Seq column")
+    }
+    NULL
+  }
+)
+
+# Print method for SGEData - displays summary of loaded data
+S7::method(print, SGEData) <- function(x, ...) {
+  n_variants <- length(unique(x@counts$SEQUENCE))
+  n_samples <- length(unique(x@counts$SAMPLE))
+  n_conditions <- length(unique(x@metadata$condition))
+  has_annotation <- !is.null(x@annotation)
+
+  cli_h1("SGE Data")
+  cli_ul(c(
+    paste0("Variants: ", format(n_variants, big.mark = ",")),
+    paste0("Samples: ", n_samples),
+    paste0("Conditions: ", n_conditions),
+    paste0("Annotation: ", if (has_annotation) "loaded" else "not loaded")
+  ))
+  cli_text("")
+  cli_text("Access data with {.code @counts}, {.code @metadata}, {.code @annotation}, {.code @complete_dataset}")
+  invisible(x)
+}
+
 
 #' SGEResults Class
 #'

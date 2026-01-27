@@ -28,12 +28,12 @@ NULL
 #' @param calculate_duration Logical; whether to calculate duration from
 #'   condition column (default: TRUE).
 #'
-#' @return A list containing:
+#' @return An [SGEData] object containing:
 #'   \describe{
-#'     \item{counts}{The raw count data frame}
-#'     \item{metadata}{The sample metadata data frame}
-#'     \item{annotation}{The variant annotation data frame}
-#'     \item{complete_dataset}{Counts joined with metadata}
+#'     \item{counts}{The raw count data frame (access via `@counts`)}
+#'     \item{metadata}{The sample metadata data frame (access via `@metadata`)}
+#'     \item{annotation}{The variant annotation data frame (access via `@annotation`)}
+#'     \item{complete_dataset}{Counts joined with metadata (access via `@complete_dataset`)}
 #'   }
 #'
 #' @examples
@@ -110,7 +110,7 @@ load_sge_data <- function(count_files,
   complete_dataset <- dplyr::left_join(counts, metadata, by = join_spec)
   message(sprintf("  Created complete dataset with %d rows", nrow(complete_dataset)))
 
-  list(
+  SGEData(
     counts = counts,
     metadata = metadata,
     annotation = annotation,
@@ -124,8 +124,11 @@ load_sge_data <- function(count_files,
 #' Transforms the loaded data into analysis-ready count matrices. This includes
 #' filtering, pivoting, deduplication, annotation joining, and artefact removal.
 #'
-#' @param complete_dataset Data frame from `load_sge_data()$complete_dataset`.
-#' @param annotation Data frame of variant annotations (from `load_sge_data()`).
+#' @param data An [SGEData] object from [load_sge_data()], or a data frame
+#'   containing the complete dataset (counts joined with metadata).
+#' @param annotation Data frame of variant annotations. If `data` is an
+#'
+#'   [SGEData] object, this is extracted automatically and can be omitted.
 #' @param exclude_samples Character vector of sample names to exclude
 #'   (default: NULL).
 #' @param exclude_targetons Character vector of targeton IDs to exclude
@@ -145,17 +148,24 @@ load_sge_data <- function(count_files,
 #'
 #' @examples
 #' \dontrun{
+#' # Using SGEData object (recommended)
 #' matrices <- prepare_count_matrices(
-#'   complete_dataset = data$complete_dataset,
-#'   annotation = data$annotation,
+#'   data = sge_data,
 #'   exclude_samples = c("bad_sample_1"),
+#'   min_counts = 10
+#' )
+#'
+#' # Using data frames directly
+#' matrices <- prepare_count_matrices(
+#'   data = complete_dataset,
+#'   annotation = annotation_df,
 #'   min_counts = 10
 #' )
 #' }
 #'
 #' @export
-prepare_count_matrices <- function(complete_dataset,
-                                   annotation,
+prepare_count_matrices <- function(data,
+                                   annotation = NULL,
                                    exclude_samples = NULL,
                                    exclude_targetons = NULL,
                                    min_counts = 10,
@@ -163,6 +173,16 @@ prepare_count_matrices <- function(complete_dataset,
                                    count_col = "COUNT",
                                    targeton_col = "targeton_id") {
   message("Preparing count matrices...")
+
+  # Extract from SGEData if provided
+ if (inherits(data, "sgeasy::SGEData")) {
+    complete_dataset <- data@complete_dataset
+    if (is.null(annotation)) {
+      annotation <- data@annotation
+    }
+  } else {
+    complete_dataset <- data
+  }
 
   # Filter samples
   if (!is.null(exclude_samples)) {
@@ -273,7 +293,8 @@ prepare_count_matrices <- function(complete_dataset,
 #' @param complete_matrices List of count matrices from `prepare_count_matrices()`.
 #' @param normalisation_matrices List of normalization matrices from
 #'   `prepare_count_matrices()`.
-#' @param metadata Sample metadata data frame.
+#' @param metadata Sample metadata data frame, or an [SGEData] object from
+#'   which the metadata will be extracted.
 #' @param condition_levels Character vector of condition factor levels
 #'   (default: c("Day4", "Day7", "Day10", "Day15")).
 #' @param ... Additional arguments passed to `run_differential_analysis()`.
@@ -287,10 +308,18 @@ prepare_count_matrices <- function(complete_dataset,
 #'
 #' @examples
 #' \dontrun{
+#' # Using SGEData object
 #' results <- analyze_screens(
 #'   complete_matrices = matrices$complete_matrices,
 #'   normalisation_matrices = matrices$normalisation_matrices,
-#'   metadata = data$metadata
+#'   metadata = sge_data
+#' )
+#'
+#' # Using metadata data frame directly
+#' results <- analyze_screens(
+#'   complete_matrices = matrices$complete_matrices,
+#'   normalisation_matrices = matrices$normalisation_matrices,
+#'   metadata = metadata_df
 #' )
 #' }
 #'
@@ -301,6 +330,11 @@ analyze_screens <- function(complete_matrices,
                             condition_levels = c("Day4", "Day7", "Day10", "Day15"),
                             ...) {
   message("Running differential analysis...")
+
+  # Extract metadata from SGEData if provided
+  if (inherits(metadata, "sgeasy::SGEData")) {
+    metadata <- metadata@metadata
+  }
 
   deseq_results <- purrr::map2(
     complete_matrices,

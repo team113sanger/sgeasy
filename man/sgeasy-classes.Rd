@@ -4,7 +4,7 @@
 \alias{sgeasy-classes}
 \title{S7 Class Definitions for sgeasy}
 \description{
-S7 class definitions for SGE analysis results. The \code{SGEResults} class
-provides a formal container for differential analysis output with
-validation and a clean print method.
+S7 class definitions for SGE analysis data and results. These classes
+provide formal containers with validation and clean print methods for
+an improved REPL experience.
 }

@@ -18,6 +18,7 @@ Depends:
     R (>= 4.1.0)
 Imports:
     cli,
+    logger,
     DESeq2 (>= 1.36.0),
     DEGreport,
     dplyr (>= 1.0.0),

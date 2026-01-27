@@ -5,8 +5,8 @@
 \title{Prepare count matrices for analysis}
 \usage{
 prepare_count_matrices(
-  complete_dataset,
-  annotation,
+  data,
+  annotation = NULL,
   exclude_samples = NULL,
   exclude_targetons = NULL,
   min_counts = 10,
@@ -16,9 +16,12 @@ prepare_count_matrices(
 )
 }
 \arguments{
-\item{complete_dataset}{Data frame from \code{load_sge_data()$complete_dataset}.}
+\item{data}{An \link{SGEData} object from \code{\link[=load_sge_data]{load_sge_data()}}, or a data frame
+containing the complete dataset (counts joined with metadata).}
 
-\item{annotation}{Data frame of variant annotations (from \code{load_sge_data()}).}
+\item{annotation}{Data frame of variant annotations. If \code{data} is an
+
+\link{SGEData} object, this is extracted automatically and can be omitted.}
 
 \item{exclude_samples}{Character vector of sample names to exclude
 (default: NULL).}
@@ -49,10 +52,17 @@ filtering, pivoting, deduplication, annotation joining, and artefact removal.
 }
 \examples{
 \dontrun{
+# Using SGEData object (recommended)
 matrices <- prepare_count_matrices(
-  complete_dataset = data$complete_dataset,
-  annotation = data$annotation,
+  data = sge_data,
   exclude_samples = c("bad_sample_1"),
+  min_counts = 10
+)
+
+# Using data frames directly
+matrices <- prepare_count_matrices(
+  data = complete_dataset,
+  annotation = annotation_df,
   min_counts = 10
 )
 }

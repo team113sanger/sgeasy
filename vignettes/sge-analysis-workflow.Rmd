@@ -27,25 +27,30 @@ For a streamlined workflow, use the stage wrapper functions:
 ```{r quick-start, eval=FALSE}
 library(sgeasy)
 
-# Stage 1: Load data
-data <- load_sge_data(
+# Stage 1: Load data (returns SGEData object)
+sge_data <- load_sge_data(
   count_files = "inputs/",
   metadata_file = "metadata/screen_metadata.tsv"
 )
+sge_data
+#> ── SGE Data ──
+#> • Variants: 50,000
+#> • Samples: 16
+#> • Conditions: 4
+#> • Annotation: loaded
 
-# Stage 2: Prepare matrices
+# Stage 2: Prepare matrices (accepts SGEData directly)
 matrices <- prepare_count_matrices(
-  complete_dataset = data$complete_dataset,
-  annotation = data$annotation,
+  data = sge_data,
   exclude_samples = c("bad_sample"),
   min_counts = 10
 )
 
-# Stage 3: Run analysis
+# Stage 3: Run analysis (can pass SGEData for metadata)
 results <- analyze_screens(
   complete_matrices = matrices$complete_matrices,
   normalisation_matrices = matrices$normalisation_matrices,
-  metadata = data$metadata
+  metadata = sge_data
 )
 
 # Stage 4: Generate QC plots
@@ -57,7 +62,7 @@ generate_qc_plots(
 # Stage 5: Generate results
 final <- generate_results(
   contrast_tables = results$contrast_tables,
-  annotation = data$annotation,
+  annotation = sge_data@annotation,
   output_dir = "results"
 )
 ```
