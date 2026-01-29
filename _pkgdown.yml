@@ -1,6 +1,5 @@
 url: https://github.com/team113sanger/sgeasy
-build:
-  llm: false
+llm-docs: false
 
 template:
   bootstrap: 5

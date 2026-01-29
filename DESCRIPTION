@@ -11,6 +11,7 @@ Description: Provides a user-friendly workflow for analyzing saturation genome
     and visualization utilities for quality control and results
     exploration. Designed to work with QUANTS output and VEP annotations.
 License: MIT + file LICENSE
+URL: https://github.com/team113sanger/sgeasy
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.3

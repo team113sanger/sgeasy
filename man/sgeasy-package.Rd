@@ -30,6 +30,13 @@ variants using inverse variance weighting}
 }
 }
 
+\seealso{
+Useful links:
+\itemize{
+  \item \url{https://github.com/team113sanger/sgeasy}
+}
+
+}
 \author{
 \strong{Maintainer}: Jamie Billington \email{jb63@sanger.ac.uk}
 
