@@ -47,6 +47,11 @@
 #' @import S7
 NULL
 
+# Register S7 methods when package is loaded
+.onLoad <- function(libname, pkgname) {
+  S7::methods_register()
+}
+
 # Suppress R CMD check notes for NSE variables
 utils::globalVariables(c(
   "Consequence", "SEQUENCE", "total_counts", "condition",

@@ -186,3 +186,42 @@ slim_consequence <- function(data) {
       )
     )
 }
+
+
+#' Calculate position effect ratios
+#'
+#' Calculates the ratio of counts between a specified timepoint and Day0
+#' for each sequence, grouped by NAME and condition.
+#'
+#' @param dataframe A data frame with COUNT, condition, NAME, and SEQUENCE columns.
+#' @param annotation A data frame with sequence annotations containing a Seq column.
+#' @param timepoint Character string specifying the timepoint to compare against Day0
+#'   (e.g., "Day10", "Day14").
+#'
+#' @return A data frame with mean counts per condition, ratio calculations,
+#'   and joined annotation data.
+#'
+#' @examples
+#' \dontrun{
+#' pos_effect <- calculate_position_effect(
+#'   dataframe = count_data,
+#'   annotation = annotation_df,
+#'   timepoint = "Day10"
+#' )
+#' }
+#'
+#' @export
+calculate_position_effect <- function(dataframe, annotation, timepoint) {
+  pos_ratio <- dataframe |>
+    dplyr::filter(.data$condition %in% c("Day0", timepoint)) |>
+    dplyr::group_by(.data$NAME, .data$condition, .data$SEQUENCE) |>
+    dplyr::summarise(mean_counts = mean(.data$COUNT), .groups = "drop") |>
+    tidyr::pivot_wider(names_from = "condition", values_from = "mean_counts") |>
+    dplyr::mutate(ratio = .data[[timepoint]] / .data$Day0) |>
+    dplyr::ungroup()
+
+  pos_ratio <- pos_ratio |>
+    dplyr::left_join(annotation, by = c("SEQUENCE" = "Seq"))
+
+  pos_ratio
+}

@@ -1,4 +1,6 @@
 url: ~
+build:
+  llm: false
 
 template:
   bootstrap: 5
@@ -22,6 +24,7 @@ reference:
   - title: "Classes"
     desc: "S7 class definitions for SGE data structures"
     contents:
+      - sgeasy-classes
       - SGEData
       - SGEResults
 

@@ -2,14 +2,14 @@ Package: sgeasy
 Title: Downstream Analysis for Saturation Genome Editing Screens
 Version: 0.1.0
 Authors@R: c(
-    person("SGE Team", email = "sge@sanger.ac.uk",
+    person("Jamie Billington", email = "jb63@sanger.ac.uk",
            role = c("aut", "cre"))
   )
-Description: Provides a complete workflow for analyzing saturation genome
+Description: Provides a user-friendly workflow for analyzing saturation genome
     editing (SGE) screen data. Includes functions for data normalization
     using control oligos, DESeq2-based differential abundance analysis,
     and visualization utilities for quality control and results
-    exploration. Designed to work with MAVE-QC output and VEP annotations.
+    exploration. Designed to work with QUANTS output and VEP annotations.
 License: MIT + file LICENSE
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)

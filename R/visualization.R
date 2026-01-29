@@ -588,3 +588,68 @@ plot_gene_level <- function(data,
     ) +
     ggplot2::facet_wrap(~ Exons, scales = "free_x", nrow = facet_nrow)
 }
+
+
+#' Plot position effect ratios
+#'
+#' Creates a scatter plot showing the ratio of counts at a specified timepoint
+#' versus Day0 across genomic coordinates, colored by consequence type with
+#' a loess smoothing line.
+#'
+#' @param pos_ratio A data frame from [calculate_position_effect()] containing
+#'   vcf_pos, ratio, and slim_consequence columns.
+#' @param timepoint Character string specifying the timepoint (used in y-axis
+#'   label, e.g., "Day10").
+#' @param colours Named vector of colors for slim_consequence values
+#'
+#' @return A ggplot object (invisibly). The plot is also printed.
+#'
+#' @examples
+#' \dontrun{
+#' pos_effect <- calculate_position_effect(count_data, annotation, "Day10")
+#' position_effect_plot(pos_effect, "Day10")
+#' }
+#'
+#' @seealso [calculate_position_effect()]
+#' @export
+position_effect_plot <- function(pos_ratio,
+                          timepoint,
+                          colours = consequence_colours) {
+  p <- ggplot2::ggplot(
+    pos_ratio,
+    ggplot2::aes(
+      x = .data$vcf_pos,
+      y = .data$ratio,
+      color = .data$slim_consequence
+    )
+  ) +
+    ggplot2::scale_y_continuous(trans = "log2") +
+    ggplot2::theme_classic() +
+    ggplot2::geom_point(size = 1, alpha = 0.5) +
+    ggplot2::scale_colour_manual(values = colours) +
+    ggplot2::scale_fill_manual(values = colours) +
+    ggplot2::ggtitle("Replicate Mean") +
+    ggplot2::xlab("GRCh38 Genomic Coordinate") +
+    ggplot2::ylab(
+      glue::glue("Average {timepoint} SGE Counts / Plasmid Counts")
+    ) +
+    ggplot2::geom_smooth(
+      method = "loess",
+      se = FALSE,
+      span = 0.5,
+      color = "blue"
+    ) +
+    ggplot2::theme(
+      axis.text.x = ggplot2::element_text(
+        angle = 90, vjust = 0.5, hjust = 1,
+        colour = "black", size = 10
+      ),
+      legend.title = ggplot2::element_blank(),
+      legend.position = "right",
+      legend.box = "vertical",
+      legend.margin = ggplot2::margin()
+    )
+
+  print(p)
+  invisible(p)
+}
