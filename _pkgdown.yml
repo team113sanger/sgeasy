@@ -1,4 +1,4 @@
-url: ~
+url: https://github.com/team113sanger/sgeasy
 build:
   llm: false
 
@@ -41,6 +41,7 @@ reference:
       - create_count_matrix
       - filter_by_counts
       - slim_consequence
+      - calculate_position_effect
       - remove_artefacts
 
   - title: "Differential Analysis"
@@ -68,6 +69,7 @@ reference:
       - plot_distance_matrices
       - build_sample_pca
       - plot_screen_pcas
+      - position_effect_plot
       - consequence_colours
       - classification_shapes
 

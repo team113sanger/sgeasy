@@ -31,7 +31,7 @@ variants using inverse variance weighting}
 }
 
 \author{
-\strong{Maintainer}: SGE Team \email{sge@sanger.ac.uk}
+\strong{Maintainer}: Jamie Billington \email{jb63@sanger.ac.uk}
 
 }
 \keyword{internal}
