@@ -32,7 +32,8 @@
 #' @importFrom dplyr filter select mutate rename rename_with left_join
 #' @importFrom dplyr group_by ungroup slice_head across rowwise between n
 #' @importFrom dplyr starts_with contains all_of summarise case_when
-#' @importFrom tidyr pivot_wider
+#' @importFrom tidyr pivot_wider unnest separate
+#' @importFrom IRanges IRanges start end
 #' @importFrom tibble column_to_rownames as_tibble
 #' @importFrom purrr map map2 imap reduce iwalk list_flatten
 #' @importFrom ggplot2 ggplot aes geom_point geom_smooth theme element_text
@@ -62,5 +63,10 @@ utils::globalVariables(c(
   "has_non_pam", "n_observations", "total_weight", "sum_weighted_lfc",
   "combined_lfc", "combined_SE", "combined_Z", "pval",
   # PCA variables
-  "PC1", "PC2"
+  "PC1", "PC2",
+  # Domain and heatmap variables
+  "domain", "source", "start", "end", "ranges",
+  "AA_change", "Amino_acids", "Protein_position",
+  "new_aa", "previous", "mean_adj_score", "mean_FDR",
+  "mutator", "slim_consequence", "functional_classification"
 ))

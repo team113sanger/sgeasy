@@ -542,6 +542,135 @@ ggsave("results/gene_level_plot_reweight.png", weighted_scores,
        width = 25, height = 6, units = "in", dpi = 300)
 ```
 
+## Protein Domain Visualization
+
+The sgeasy package includes functions for creating amino acid substitution
+heatmaps with protein domain annotations. This visualization shows functional
+effects across the protein sequence.
+### Fetching Protein Domains
+
+Fetch domain annotations from Ensembl for your transcript:
+
+```{r fetch-domains}
+# Fetch domains for your transcript
+transcript_id <- "ENST00000355451"  # Replace with your transcript
+domains <- fetch_domains_ensembl(transcript_id)
+
+# Merge overlapping domain ranges
+merged_domains <- merge_overlapping_domains(domains)
+merged_domains
+```
+
+### Preparing Protein altering Variant Data
+
+Filter your dataset to Protein altering variants and prepare for heatmap visualization:
+
+```{r prepare-protein-altering}
+# Filter to protein altering variants
+protein_altering_df <- filter_protein_altering_variants(
+  combined_dataset,
+  exclude_mutators = "custom",
+  exclude_consequences = "synonymous"
+)
+
+# Prepare data for heatmap (aggregates by amino acid position)
+plot_df <- prepare_amino_acid_heatmap_data(
+  protein_altering_df,
+  score_col = "adj_score_continuous",
+  fdr_col = "FDR_continuous",
+  fdr_threshold = 0.01
+)
+
+head(plot_df)
+```
+
+### Creating the Combined Visualization
+
+Create a combined plot with domain track above the amino acid heatmap:
+
+```{r domain-heatmap}
+# Option 1: All-in-one with automatic domain fetching
+p <- plot_domain_heatmap(
+  data = protein_altering_df,
+  transcript_id = "ENST00000355451",
+  height_ratio = c(1, 15)
+)
+
+# Option 2: With pre-fetched domains
+p <- plot_domain_heatmap(
+  data = protein_altering_df,
+  domain_df = merged_domains,
+  height_ratio = c(1, 15)
+)
+
+# Save the plot
+ggsave("results/amino_acid_domain_heatmap.png", p,
+       width = 8, height = 7, units = "in", dpi = 300)
+```
+
+### Creating Individual Plot Components
+
+For more control, create the domain track and heatmap separately:
+
+```{r individual-plots}
+# Get shared x-axis range
+x_range <- range(plot_df$Protein_position)
+
+# Create domain track
+domain_track <- plot_domain_track(
+  merged_domains,
+  x_range = x_range,
+  show_legend = TRUE
+)
+
+# Create amino acid heatmap
+amino_acid_plot <- plot_amino_acid_heatmap(
+  plot_df,
+  x_range = x_range,
+  show_x_axis = TRUE
+)
+
+# Combine with patchwork
+library(patchwork)
+combined_plot <- domain_track / amino_acid_plot +
+  plot_layout(heights = c(1, 15), axes = "collect_x")
+
+# Save
+ggsave("results/custom_domain_heatmap.png", combined_plot,
+       width = 8, height = 6, units = "in", dpi = 300)
+```
+
+### Customizing Colors
+
+You can customize the classification colors:
+
+```{r custom-colors}
+# Custom classification colors
+my_colors <- c(
+  "unchanged" = "grey80",
+  "enriched"  = "firebrick",
+  "depleted"  = "steelblue"
+)
+
+p <- plot_domain_heatmap(
+  data = protein_altering_df,
+  domain_df = merged_domains,
+  classification_colors = my_colors
+)
+```
+
+### Filtering Domains by Source
+
+Optionally filter to specific domain sources:
+
+```{r filter-domains}
+# Fetch only Pfam and SMART domains
+domains <- fetch_domains_ensembl(
+  "ENST00000355451",
+  domain_sources = c("Pfam", "SMART")
+)
+```
+
 ## Exporting Results
 
 Save the final results:
