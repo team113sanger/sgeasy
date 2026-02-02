@@ -72,6 +72,20 @@ reference:
       - consequence_colours
       - classification_shapes
 
+  - title: "Domain Visualization"
+    desc: "Protein domain fetching and heatmap visualization"
+    contents:
+      - fetch_domains_interpro
+      - fetch_domains_ensembl
+      - merge_overlapping_domains
+      - filter_protein_altering_variants
+      - prepare_amino_acid_heatmap_data
+      - plot_domain_track
+      - plot_amino_acid_heatmap
+      - plot_domain_heatmap
+      - amino_acid_order
+      - classification_heatmap_colours
+
 articles:
   - title: "Getting Started"
     navbar: ~

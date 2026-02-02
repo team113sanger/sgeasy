@@ -1,6 +1,6 @@
 # Protein Domain Visualization Functions
 # =======================================
-# Functions for fetching protein domains from Ensembl and creating
+# Functions for fetching protein domains from Ensembl/InterPro and creating
 # combined domain track + amino acid heatmap visualizations.
 
 # Exported Data Objects --------------------------------------------------------
@@ -128,7 +128,161 @@ url <- paste0(
       dplyr::filter(.data$source %in% domain_sources)
   }
 
-  return(tibble::as_tibble(domain_df))
+
+  tibble::as_tibble(domain_df)
+}
+
+#' Fetch protein domains from InterPro REST API
+#'
+#' Retrieves protein domain annotations for a given UniProt accession from the
+#' InterPro REST API. InterPro aggregates domains from multiple sources
+#' including Pfam, SMART, CDD, PROSITE, and others.
+#'
+#' @param uniprot_acc Character. UniProt accession (e.g., "P04637" for p53).
+#' @param domain_sources Character vector. Filter to specific domain sources
+#'   (e.g., c("pfam", "smart")). If NULL (default), returns all sources.
+#'   Available sources include: pfam, smart, cdd, prosite, panther, etc.
+#' @param entry_types Character vector. Filter to specific InterPro entry types
+#'   (e.g., c("domain", "family")). If NULL (default), returns only "domain".
+#' @param timeout Numeric. Request timeout in seconds (default: 30).
+#'
+#' @return A tibble with columns: domain, source, start, end, interpro_id.
+#'   Returns NULL if no domains are found.
+#'
+#' @details
+#' The InterPro API provides comprehensive domain annotations aggregated from
+#' multiple member databases. Each domain entry includes the InterPro accession
+#' and mappings to the underlying member database signatures.
+#'
+#' @examples
+#' \dontrun{
+#' # Fetch all domains for p53
+#' domains <- fetch_domains_interpro("P04637")
+#'
+#' # Fetch only Pfam domains
+#' domains <- fetch_domains_interpro("P04637", domain_sources = "pfam")
+#' }
+#'
+#' @export
+fetch_domains_interpro <- function(uniprot_acc,
+                                   domain_sources = NULL,
+                                   entry_types = "domain",
+                                   timeout = 30) {
+  # Validate input
+  if (!is.character(uniprot_acc) || length(uniprot_acc) != 1) {
+    stop("uniprot_acc must be a single character string")
+  }
+
+  # Build API URL
+  url <- paste0(
+    "https://www.ebi.ac.uk/interpro/api/entry/interpro/protein/uniprot/",
+    uniprot_acc,
+    "?page_size=200"
+  )
+
+  response <- httr::GET(url, httr::timeout(timeout))
+
+  if (httr::status_code(response) == 404) {
+    message("UniProt accession not found in InterPro.")
+    return(NULL)
+  }
+
+  if (httr::status_code(response) != 200) {
+    stop("Failed to fetch InterPro data. Status: ", httr::status_code(response))
+  }
+
+  data <- jsonlite::fromJSON(
+    httr::content(response, "text", encoding = "UTF-8"),
+    flatten = FALSE
+  )
+
+  if (is.null(data$results) || length(data$results) == 0) {
+    message("No domains found for this protein.")
+    return(NULL)
+  }
+
+  # Parse results into domain data frame
+  results <- lapply(seq_len(nrow(data$results)), function(i) {
+    entry <- data$results[i, ]
+    meta <- entry$metadata
+
+    # Filter by entry type
+    if (!is.null(entry_types) && !meta$type %in% entry_types) {
+      return(NULL)
+    }
+
+    # Get protein locations
+    proteins <- entry$proteins[[1]]
+    if (is.null(proteins) || nrow(proteins) == 0) {
+      return(NULL)
+    }
+
+    locations <- proteins$entry_protein_locations[[1]]
+    if (is.null(locations) || length(locations) == 0) {
+      return(NULL)
+    }
+
+    # Extract fragments from all locations
+    fragments_list <- lapply(seq_len(nrow(locations)), function(j) {
+      frags <- locations$fragments[[j]]
+      if (is.null(frags) || nrow(frags) == 0) {
+        return(NULL)
+      }
+      frags
+    })
+
+    fragments <- do.call(rbind, fragments_list)
+    if (is.null(fragments) || nrow(fragments) == 0) {
+      return(NULL)
+    }
+
+    # Get member database sources
+    member_dbs <- names(meta$member_databases)
+    source_str <- if (length(member_dbs) > 0) {
+      paste(member_dbs, collapse = ",")
+    } else {
+      "interpro"
+    }
+
+    tibble::tibble(
+      domain = meta$name,
+      source = source_str,
+      start = fragments$start,
+      end = fragments$end,
+      interpro_id = meta$accession
+    )
+  })
+
+  domain_df <- do.call(rbind, results)
+
+  if (is.null(domain_df) || nrow(domain_df) == 0) {
+    message("No domains found matching criteria.")
+    return(NULL)
+  }
+
+  # Filter by domain sources if specified
+  if (!is.null(domain_sources)) {
+    domain_sources <- tolower(domain_sources)
+    domain_df <- domain_df |>
+      dplyr::filter(
+        vapply(
+          strsplit(.data$source, ","),
+          function(x) any(tolower(x) %in% domain_sources),
+          logical(1)
+        )
+      )
+
+    if (nrow(domain_df) == 0) {
+      message("No domains found from specified sources.")
+      return(NULL)
+    }
+  }
+
+  domain_df <- domain_df |>
+    dplyr::distinct() |>
+    dplyr::arrange(.data$start)
+
+  tibble::as_tibble(domain_df)
 }
 
 # Range Merging Functions ------------------------------------------------------
@@ -173,6 +327,33 @@ merge_overlapping_domains <- function(domain_df) {
 }
 
 # Data Preparation Functions ---------------------------------------------------
+
+#' Add AA_change column and convert protein position to numeric
+#'
+#' Internal helper function that creates the AA_change identifier (e.g., "A123V")
+#' from amino acid and position columns, converts position to numeric, and
+#' filters out rows with invalid positions.
+#'
+#' @param data A data frame containing variant information.
+#' @param amino_acids_col Character. Name of the amino acids column.
+#' @param position_col Character. Name of the protein position column.
+#'
+#' @return A data frame with AA_change column added, Protein_position as numeric,
+#'   and rows with NA positions removed.
+#'
+#' @keywords internal
+add_aa_change <- function(data, amino_acids_col, position_col) {
+  data |>
+    dplyr::mutate(
+      AA_change = paste0(
+        substr(.data[[amino_acids_col]], 1, 1),
+        .data[[position_col]],
+        substr(.data[[amino_acids_col]], 3, 3)
+      ),
+      Protein_position = as.numeric(.data[[position_col]])
+    ) |>
+    dplyr::filter(!is.na(.data$Protein_position))
+}
 
 #' Filter dataset to protein_altering variants for heatmap visualization
 #'
@@ -224,16 +405,7 @@ filter_protein_altering_variants <- function(data,
   }
 
   # Create AA_change and ensure numeric position
-  result <- result |>
-    dplyr::mutate(
-      AA_change = paste0(
-        substr(.data[[amino_acids_col]], 1, 1),
-        .data[[position_col]],
-        substr(.data[[amino_acids_col]], 3, 3)
-      ),
-      Protein_position = as.numeric(.data[[position_col]])
-    ) |>
-    dplyr::filter(!is.na(.data$Protein_position))
+  result <- add_aa_change(result, amino_acids_col, position_col)
 
   tibble::as_tibble(result)
 }
@@ -276,16 +448,7 @@ prepare_amino_acid_heatmap_data <- function(data,
                                             amino_acids_col = "Amino_acids",
                                             position_col = "Protein_position") {
   # Create AA_change identifier
-  plot_df <- data |>
-    dplyr::mutate(
-      AA_change = paste0(
-        substr(.data[[amino_acids_col]], 1, 1),
-        .data[[position_col]],
-        substr(.data[[amino_acids_col]], 3, 3)
-      ),
-      Protein_position = as.numeric(.data[[position_col]])
-    ) |>
-    dplyr::filter(!is.na(.data$Protein_position))
+  plot_df <- add_aa_change(data, amino_acids_col, position_col)
 
   # Group and summarise
   plot_df <- plot_df |>
@@ -528,18 +691,21 @@ plot_amino_acid_heatmap <- function(data,
 #' @param data A data frame containing variant data with columns for amino acid
 #'   changes, positions, scores, and FDR values. Will be processed by
 #'   \code{\link{prepare_amino_acid_heatmap_data}} if not already prepared.
-#' @param transcript_id Character. Ensembl transcript ID for fetching domains.
-#'   Required if \code{domain_df} is NULL.
+#' @param uniprot_acc Character. UniProt accession for fetching domains from
+#'   InterPro (e.g., "P04637"). Takes precedence over transcript_id.
+#' @param transcript_id Character. Ensembl transcript ID for fetching domains
+#'   (e.g., "ENST00000355451"). Used only if uniprot_acc is NULL.
 #' @param domain_df A data frame of domains (output from
-#'   \code{\link{fetch_domains_ensembl}}). If NULL and transcript_id provided,
-#'   domains will be fetched automatically.
+#'   \code{\link{fetch_domains_interpro}} or \code{\link{fetch_domains_ensembl}}).
+#'   If NULL, domains will be fetched using uniprot_acc or transcript_id.
 #' @param merge_domains Logical. Whether to merge overlapping domains
 #'   (default: TRUE).
 #' @param prepared Logical. Whether \code{data} has already been processed by
 #'   \code{\link{prepare_amino_acid_heatmap_data}} (default: FALSE).
 #' @param height_ratio Numeric vector of length 2. Relative heights of domain
 #'   track and heatmap (default: c(1, 15)).
-#' @param domain_sources Character vector. Filter domains to specific sources.
+#' @param domain_sources Character vector. Filter domains to specific sources
+#'   (e.g., c("pfam", "smart") for InterPro).
 #' @param classification_colors Named character vector for heatmap colors.
 #' @param domain_colors Named character vector for domain colors.
 #' @param ... Additional arguments passed to
@@ -549,14 +715,20 @@ plot_amino_acid_heatmap <- function(data,
 #'
 #' @examples
 #' \dontrun{
-#' # With automatic domain fetching
+#' # With InterPro (recommended)
+#' p <- plot_domain_heatmap(
+#'   data = variant_results,
+#'   uniprot_acc = "P04637"
+#' )
+#'
+#' # With Ensembl
 #' p <- plot_domain_heatmap(
 #'   data = variant_results,
 #'   transcript_id = "ENST00000355451"
 #' )
 #'
 #' # With pre-fetched domains
-#' domains <- fetch_domains_ensembl("ENST00000355451")
+#' domains <- fetch_domains_interpro("P04637")
 #' p <- plot_domain_heatmap(
 #'   data = variant_results,
 #'   domain_df = domains
@@ -568,6 +740,7 @@ plot_amino_acid_heatmap <- function(data,
 #'
 #' @export
 plot_domain_heatmap <- function(data,
+                                uniprot_acc = NULL,
                                 transcript_id = NULL,
                                 domain_df = NULL,
                                 merge_domains = TRUE,
@@ -579,13 +752,19 @@ plot_domain_heatmap <- function(data,
                                 ...) {
   # Fetch domains if needed
   if (is.null(domain_df)) {
-    if (is.null(transcript_id)) {
-      stop("Either 'domain_df' or 'transcript_id' must be provided.")
+    if (!is.null(uniprot_acc)) {
+      domain_df <- fetch_domains_interpro(
+        uniprot_acc,
+        domain_sources = domain_sources
+      )
+    } else if (!is.null(transcript_id)) {
+      domain_df <- fetch_domains_ensembl(
+        transcript_id,
+        domain_sources = domain_sources
+      )
+    } else {
+      stop("Provide 'domain_df', 'uniprot_acc', or 'transcript_id'.")
     }
-    domain_df <- fetch_domains_ensembl(
-      transcript_id,
-      domain_sources = domain_sources
-    )
   }
 
   # Merge domains if requested
