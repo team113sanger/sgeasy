@@ -6,6 +6,7 @@
 \usage{
 plot_domain_heatmap(
   data,
+  uniprot_acc = NULL,
   transcript_id = NULL,
   domain_df = NULL,
   merge_domains = TRUE,
@@ -22,12 +23,15 @@ plot_domain_heatmap(
 changes, positions, scores, and FDR values. Will be processed by
 \code{\link{prepare_amino_acid_heatmap_data}} if not already prepared.}
 
-\item{transcript_id}{Character. Ensembl transcript ID for fetching domains.
-Required if \code{domain_df} is NULL.}
+\item{uniprot_acc}{Character. UniProt accession for fetching domains from
+InterPro (e.g., "P04637"). Takes precedence over transcript_id.}
+
+\item{transcript_id}{Character. Ensembl transcript ID for fetching domains
+(e.g., "ENST00000355451"). Used only if uniprot_acc is NULL.}
 
 \item{domain_df}{A data frame of domains (output from
-\code{\link{fetch_domains_ensembl}}). If NULL and transcript_id provided,
-domains will be fetched automatically.}
+\code{\link{fetch_domains_interpro}} or \code{\link{fetch_domains_ensembl}}).
+If NULL, domains will be fetched using uniprot_acc or transcript_id.}
 
 \item{merge_domains}{Logical. Whether to merge overlapping domains
 (default: TRUE).}
@@ -38,7 +42,8 @@ domains will be fetched automatically.}
 \item{height_ratio}{Numeric vector of length 2. Relative heights of domain
 track and heatmap (default: c(1, 15)).}
 
-\item{domain_sources}{Character vector. Filter domains to specific sources.}
+\item{domain_sources}{Character vector. Filter domains to specific sources
+(e.g., c("pfam", "smart") for InterPro).}
 
 \item{classification_colors}{Named character vector for heatmap colors.}
 
@@ -57,14 +62,20 @@ to align x-axes.
 }
 \examples{
 \dontrun{
-# With automatic domain fetching
+# With InterPro (recommended)
+p <- plot_domain_heatmap(
+  data = variant_results,
+  uniprot_acc = "P04637"
+)
+
+# With Ensembl
 p <- plot_domain_heatmap(
   data = variant_results,
   transcript_id = "ENST00000355451"
 )
 
 # With pre-fetched domains
-domains <- fetch_domains_ensembl("ENST00000355451")
+domains <- fetch_domains_interpro("P04637")
 p <- plot_domain_heatmap(
   data = variant_results,
   domain_df = domains
