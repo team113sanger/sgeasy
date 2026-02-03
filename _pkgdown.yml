@@ -75,8 +75,10 @@ reference:
   - title: "Domain Visualization"
     desc: "Protein domain fetching and heatmap visualization"
     contents:
+      - fetch_domains_ted
       - fetch_domains_interpro
       - fetch_domains_ensembl
+      - fetch_plddt_alphafold
       - merge_overlapping_domains
       - filter_protein_altering_variants
       - prepare_amino_acid_heatmap_data

@@ -1,22 +1,22 @@
 # sgeasy
 
-Downstream analysis tools for Saturation Genome Editing (SGE) screens.
+Downstream analysis tools for Saturation Genome Editing (SGE) screens. This package was developed by David Adams' lab at WTSI and contains functions for integrating SGE data across screens to the gene-level and methods.
 
 ## Installation
 
 ```r
-# Install from GitHub (when available)
-# devtools::install_github("your-org/sgeasy")
+remotes::install_github("t113sanger/sgeasy")
 
 # Or install locally
 devtools::install()
 ```
 ## Overview
 
-sgedown provides a complete workflow for analyzing SGE screen data:
+sgedown provides a workflow for analyzing SGE screen data:
 
 - **Normalization**: Size factor estimation using control oligos (synonymous/intronic variants)
 - **Differential Analysis**: DESeq2-based differential abundance across time points
+- **Meta-analysis**: Combining variant scores from across screens
 - **Visualization**: Quality control plots and sample comparisons
 
 ## Quick Start

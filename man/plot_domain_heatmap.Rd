@@ -8,11 +8,13 @@ plot_domain_heatmap(
   data,
   uniprot_acc = NULL,
   transcript_id = NULL,
+  domain_api = "ted",
   domain_df = NULL,
   merge_domains = TRUE,
   prepared = FALSE,
   height_ratio = c(1, 15),
   domain_sources = NULL,
+  consensus_levels = NULL,
   classification_colors = NULL,
   domain_colors = NULL,
   ...
@@ -23,15 +25,18 @@ plot_domain_heatmap(
 changes, positions, scores, and FDR values. Will be processed by
 \code{\link{prepare_amino_acid_heatmap_data}} if not already prepared.}
 
-\item{uniprot_acc}{Character. UniProt accession for fetching domains from
-InterPro (e.g., "P04637"). Takes precedence over transcript_id.}
+\item{uniprot_acc}{Character. UniProt accession for fetching domains
+(e.g., "P04637"). Used with domain_api = "interpro" or "ted".}
 
 \item{transcript_id}{Character. Ensembl transcript ID for fetching domains
-(e.g., "ENST00000355451"). Used only if uniprot_acc is NULL.}
+(e.g., "ENST00000355451"). Used with domain_api = "ensembl".}
 
-\item{domain_df}{A data frame of domains (output from
-\code{\link{fetch_domains_interpro}} or \code{\link{fetch_domains_ensembl}}).
-If NULL, domains will be fetched using uniprot_acc or transcript_id.}
+\item{domain_api}{Character. Which API to use for fetching domains:
+"ted" (default, structural domains from AlphaFold),
+"interpro" (sequence-based, aggregates Pfam/SMART/etc), or
+"ensembl" (requires transcript_id).}
+
+\item{domain_df}{A data frame of domains. If provided, skips API fetch.}
 
 \item{merge_domains}{Logical. Whether to merge overlapping domains
 (default: TRUE).}
@@ -44,6 +49,9 @@ track and heatmap (default: c(1, 15)).}
 
 \item{domain_sources}{Character vector. Filter domains to specific sources
 (e.g., c("pfam", "smart") for InterPro).}
+
+\item{consensus_levels}{Character vector. For TED API only: filter by
+consensus level ("high", "medium", "low").}
 
 \item{classification_colors}{Named character vector for heatmap colors.}
 
@@ -62,23 +70,25 @@ to align x-axes.
 }
 \examples{
 \dontrun{
-# With InterPro (recommended)
+# With TED (structural domains, recommended)
 p <- plot_domain_heatmap(
   data = variant_results,
-  uniprot_acc = "P04637"
+  uniprot_acc = "P04637",
+  domain_api = "ted"
+)
+
+# With InterPro (sequence-based domains)
+p <- plot_domain_heatmap(
+  data = variant_results,
+  uniprot_acc = "P04637",
+  domain_api = "interpro"
 )
 
 # With Ensembl
 p <- plot_domain_heatmap(
   data = variant_results,
-  transcript_id = "ENST00000355451"
-)
-
-# With pre-fetched domains
-domains <- fetch_domains_interpro("P04637")
-p <- plot_domain_heatmap(
-  data = variant_results,
-  domain_df = domains
+  transcript_id = "ENST00000355451",
+  domain_api = "ensembl"
 )
 
 # Save to file

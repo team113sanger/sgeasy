@@ -285,6 +285,215 @@ fetch_domains_interpro <- function(uniprot_acc,
   tibble::as_tibble(domain_df)
 }
 
+#' Fetch protein domains from TED (The Encyclopedia of Domains)
+#'
+#' Retrieves consensus structural domain annotations for a given UniProt
+#' accession from the TED API. TED provides domain boundaries derived from
+#' AlphaFold structures using consensus of Chainsaw, Merizo, and UniDoc.
+#'
+#' @param uniprot_acc Character. UniProt accession (e.g., "Q8IVD9").
+#' @param consensus_levels Character vector. Filter to specific consensus
+#'   levels: "high", "medium", or "low". If NULL (default), returns all.
+#' @param timeout Numeric. Request timeout in seconds (default: 30).
+#'
+#' @return A tibble with columns: domain, source, start, end, ted_id,
+#'   consensus_level, cath_label, plddt.
+#'   Returns NULL if no domains are found.
+#'
+#' @details
+#' TED (The Encyclopedia of Domains) provides structural domain annotations
+#' derived from AlphaFold models. Domains are identified using a consensus
+#' of three segmentation methods (Chainsaw, Merizo, UniDoc). High consensus
+#' means all three methods agree; medium means two agree.
+#'
+#' @examples
+#' \dontrun{
+#' # Fetch all TED domains
+#' domains <- fetch_domains_ted("Q8IVD9")
+#'
+#' # Fetch only high-confidence domains
+#' domains <- fetch_domains_ted("Q8IVD9", consensus_levels = "high")
+#' }
+#'
+#' @export
+fetch_domains_ted <- function(uniprot_acc,
+                              consensus_levels = NULL,
+                              timeout = 30) {
+
+  # Validate input
+  if (!is.character(uniprot_acc) || length(uniprot_acc) != 1) {
+    stop("uniprot_acc must be a single character string")
+  }
+
+  # Build API URL
+  url <- paste0(
+    "https://ted.cathdb.info/api/v1/uniprot/summary/",
+    uniprot_acc,
+    "?skip=0&limit=200"
+  )
+
+  response <- httr::GET(url, httr::timeout(timeout))
+
+  if (httr::status_code(response) == 404) {
+    message("UniProt accession not found in TED.")
+    return(NULL)
+  }
+
+  if (httr::status_code(response) != 200) {
+    stop("Failed to fetch TED data. Status: ", httr::status_code(response))
+  }
+
+  data <- jsonlite::fromJSON(
+    httr::content(response, "text", encoding = "UTF-8")
+  )
+
+  if (is.null(data$data) || length(data$data) == 0) {
+    message("No domains found for this protein in TED.")
+    return(NULL)
+  }
+
+  domains <- data$data
+
+  # Parse chopping field to get start/end positions
+  chopping_parsed <- strsplit(domains$chopping, "-")
+  starts <- vapply(chopping_parsed, function(x) as.integer(x[1]), integer(1))
+  ends <- vapply(chopping_parsed, function(x) as.integer(x[2]), integer(1))
+
+  # Build domain name from CATH label or TED ID
+  domain_names <- ifelse(
+    domains$cath_label != "-",
+    paste0("CATH:", domains$cath_label),
+    paste0("TED:", sub(".*_(TED\\d+)$", "\\1", domains$ted_id))
+  )
+
+  domain_df <- tibble::tibble(
+    domain = domain_names,
+    source = "TED",
+    start = starts,
+    end = ends,
+    ted_id = domains$ted_id,
+    consensus_level = domains$consensus_level,
+    cath_label = domains$cath_label,
+    plddt = domains$plddt
+  )
+
+  # Filter by consensus level if specified
+  if (!is.null(consensus_levels)) {
+    domain_df <- domain_df |>
+      dplyr::filter(.data$consensus_level %in% consensus_levels)
+
+    if (nrow(domain_df) == 0) {
+      message("No domains found with specified consensus levels.")
+      return(NULL)
+    }
+  }
+
+  domain_df <- domain_df |>
+    dplyr::arrange(.data$start)
+
+  tibble::as_tibble(domain_df)
+}
+
+#' Fetch per-residue pLDDT scores from AlphaFold Database
+#'
+#' Retrieves per-residue pLDDT (predicted Local Distance Difference Test)
+#' confidence scores from the AlphaFold Database for a given UniProt accession.
+#'
+#' @param uniprot_acc Character. UniProt accession (e.g., "Q8IVD9").
+#' @param timeout Numeric. Request timeout in seconds (default: 30).
+#'
+#' @return A tibble with columns: position, plddt, confidence_category.
+#'   Returns NULL if no AlphaFold model is available.
+#'
+#' @details
+#' pLDDT scores range from 0 to 100:
+#' \itemize{
+#'   \item Very high (>90): High accuracy for backbone and sidechains
+#'   \item Confident (70-90): Correct backbone, some sidechain uncertainty
+#'   \item Low (50-70): Low confidence
+#'   \item Very low (<50): Often disordered or flexible regions
+#' }
+#'
+#' Confidence categories: "H" (high), "M" (medium), "L" (low), "D" (disordered).
+#'
+#' @examples
+#' \dontrun{
+#' plddt <- fetch_plddt_alphafold("Q8IVD9")
+#'
+#' # Plot pLDDT along protein
+#' library(ggplot2)
+#' ggplot(plddt, aes(x = position, y = plddt)) +
+#'   geom_line() +
+#'   geom_hline(yintercept = c(50, 70, 90), linetype = "dashed", alpha = 0.5)
+#' }
+#'
+#' @export
+fetch_plddt_alphafold <- function(uniprot_acc, timeout = 30) {
+  # Validate input
+  if (!is.character(uniprot_acc) || length(uniprot_acc) != 1) {
+    stop("uniprot_acc must be a single character string")
+  }
+
+  # First get the model metadata to find the confidence file URL
+  meta_url <- paste0(
+    "https://alphafold.ebi.ac.uk/api/prediction/",
+    uniprot_acc
+  )
+
+  responsre <- httr::GET(meta_url, httr::timeout(timeout))
+
+  if (httr::status_code(response) == 404) {
+    message("UniProt accession not found in AlphaFold Database.")
+    return(NULL)
+  }
+
+  if (httr::status_code(response) != 200) {
+    stop(
+      "Failed to fetch AlphaFold metadata. Status: ",
+      httr::status_code(response)
+    )
+  }
+
+  meta <- jsonlite::fromJSON(
+    httr::content(response, "text", encoding = "UTF-8")
+  )
+
+  # Handle case where API returns a list (take first entry)
+  if (is.data.frame(meta)) {
+    confidence_url <- meta$plddtDocUrl[1]
+  } else if (is.list(meta)) {
+    confidence_url <- meta[[1]]$plddtDocUrl
+  } else {
+    stop("Unexpected API response format")
+  }
+
+  if (is.null(confidence_url) || is.na(confidence_url)) {
+    message("No confidence data available for this protein.")
+    return(NULL)
+  }
+
+  # Fetch the confidence JSON
+  conf_response <- httr::GET(confidence_url, httr::timeout(timeout))
+
+  if (httr::status_code(conf_response) != 200) {
+    stop(
+      "Failed to fetch confidence data. Status: ",
+      httr::status_code(conf_response)
+    )
+  }
+
+  conf_data <- jsonlite::fromJSON(
+    httr::content(conf_response, "text", encoding = "UTF-8")
+  )
+
+  # Build tibble from the parallel arrays
+  tibble::tibble(
+    position = conf_data$residueNumber,
+    plddt = conf_data$confidenceScore,
+    confidence_category = conf_data$confidenceCategory
+  )
+}
+
 # Range Merging Functions ------------------------------------------------------
 
 #' Merge overlapping domain ranges
@@ -691,13 +900,15 @@ plot_amino_acid_heatmap <- function(data,
 #' @param data A data frame containing variant data with columns for amino acid
 #'   changes, positions, scores, and FDR values. Will be processed by
 #'   \code{\link{prepare_amino_acid_heatmap_data}} if not already prepared.
-#' @param uniprot_acc Character. UniProt accession for fetching domains from
-#'   InterPro (e.g., "P04637"). Takes precedence over transcript_id.
+#' @param uniprot_acc Character. UniProt accession for fetching domains
+#'   (e.g., "P04637"). Used with domain_api = "interpro" or "ted".
 #' @param transcript_id Character. Ensembl transcript ID for fetching domains
-#'   (e.g., "ENST00000355451"). Used only if uniprot_acc is NULL.
-#' @param domain_df A data frame of domains (output from
-#'   \code{\link{fetch_domains_interpro}} or \code{\link{fetch_domains_ensembl}}).
-#'   If NULL, domains will be fetched using uniprot_acc or transcript_id.
+#'   (e.g., "ENST00000355451"). Used with domain_api = "ensembl".
+#' @param domain_api Character. Which API to use for fetching domains:
+#'   "ted" (default, structural domains from AlphaFold),
+#'   "interpro" (sequence-based, aggregates Pfam/SMART/etc), or
+#'   "ensembl" (requires transcript_id).
+#' @param domain_df A data frame of domains. If provided, skips API fetch.
 #' @param merge_domains Logical. Whether to merge overlapping domains
 #'   (default: TRUE).
 #' @param prepared Logical. Whether \code{data} has already been processed by
@@ -706,6 +917,8 @@ plot_amino_acid_heatmap <- function(data,
 #'   track and heatmap (default: c(1, 15)).
 #' @param domain_sources Character vector. Filter domains to specific sources
 #'   (e.g., c("pfam", "smart") for InterPro).
+#' @param consensus_levels Character vector. For TED API only: filter by
+#'   consensus level ("high", "medium", "low").
 #' @param classification_colors Named character vector for heatmap colors.
 #' @param domain_colors Named character vector for domain colors.
 #' @param ... Additional arguments passed to
@@ -715,23 +928,25 @@ plot_amino_acid_heatmap <- function(data,
 #'
 #' @examples
 #' \dontrun{
-#' # With InterPro (recommended)
+#' # With TED (structural domains, recommended)
 #' p <- plot_domain_heatmap(
 #'   data = variant_results,
-#'   uniprot_acc = "P04637"
+#'   uniprot_acc = "P04637",
+#'   domain_api = "ted"
+#' )
+#'
+#' # With InterPro (sequence-based domains)
+#' p <- plot_domain_heatmap(
+#'   data = variant_results,
+#'   uniprot_acc = "P04637",
+#'   domain_api = "interpro"
 #' )
 #'
 #' # With Ensembl
 #' p <- plot_domain_heatmap(
 #'   data = variant_results,
-#'   transcript_id = "ENST00000355451"
-#' )
-#'
-#' # With pre-fetched domains
-#' domains <- fetch_domains_interpro("P04637")
-#' p <- plot_domain_heatmap(
-#'   data = variant_results,
-#'   domain_df = domains
+#'   transcript_id = "ENST00000355451",
+#'   domain_api = "ensembl"
 #' )
 #'
 #' # Save to file
@@ -742,28 +957,45 @@ plot_amino_acid_heatmap <- function(data,
 plot_domain_heatmap <- function(data,
                                 uniprot_acc = NULL,
                                 transcript_id = NULL,
+                                domain_api = "ted",
                                 domain_df = NULL,
                                 merge_domains = TRUE,
                                 prepared = FALSE,
                                 height_ratio = c(1, 15),
                                 domain_sources = NULL,
+                                consensus_levels = NULL,
                                 classification_colors = NULL,
                                 domain_colors = NULL,
                                 ...) {
+  # Validate domain_api
+  domain_api <- match.arg(domain_api, c("ted", "interpro", "ensembl"))
+
   # Fetch domains if needed
   if (is.null(domain_df)) {
-    if (!is.null(uniprot_acc)) {
+    if (domain_api == "ted") {
+      if (is.null(uniprot_acc)) {
+        stop("'uniprot_acc' required for TED API.")
+      }
+      domain_df <- fetch_domains_ted(
+        uniprot_acc,
+        consensus_levels = consensus_levels
+      )
+    } else if (domain_api == "interpro") {
+      if (is.null(uniprot_acc)) {
+        stop("'uniprot_acc' required for InterPro API.")
+      }
       domain_df <- fetch_domains_interpro(
         uniprot_acc,
         domain_sources = domain_sources
       )
-    } else if (!is.null(transcript_id)) {
+    } else if (domain_api == "ensembl") {
+      if (is.null(transcript_id)) {
+        stop("'transcript_id' required for Ensembl API.")
+      }
       domain_df <- fetch_domains_ensembl(
         transcript_id,
         domain_sources = domain_sources
       )
-    } else {
-      stop("Provide 'domain_df', 'uniprot_acc', or 'transcript_id'.")
     }
   }
 

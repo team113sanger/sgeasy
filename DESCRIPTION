@@ -2,9 +2,11 @@ Package: sgeasy
 Title: Downstream Analysis for Saturation Genome Editing Screens
 Version: 0.1.0
 Authors@R: c(
-    person("Jamie Billington", email = "jb63@sanger.ac.uk",
-           role = c("aut", "cre"))
-  )
+    person("Jamie", "Billington", email = "jb63@sanger.ac.uk",
+           role = c("aut", "cre")),
+    person("Andrew", "Waters", email = "aw29@sanger.ac.uk",
+           role = "aut")
+    )
 Description: Provides a user-friendly workflow for analyzing saturation genome
     editing (SGE) screen data. Includes functions for data normalization
     using control oligos, DESeq2-based differential abundance analysis,

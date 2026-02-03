@@ -40,5 +40,10 @@ Useful links:
 \author{
 \strong{Maintainer}: Jamie Billington \email{jb63@sanger.ac.uk}
 
+Authors:
+\itemize{
+  \item Andrew Waters \email{aw29@sanger.ac.uk}
+}
+
 }
 \keyword{internal}
