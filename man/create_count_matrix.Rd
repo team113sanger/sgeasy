@@ -4,20 +4,24 @@
 \alias{create_count_matrix}
 \title{Create count matrix from annotated data}
 \usage{
-create_count_matrix(data, sample_pattern = "count")
+create_count_matrix(data, sample_pattern = "count", consequence_types = NULL)
 }
 \arguments{
 \item{data}{A data frame with SEQUENCE column and sample count columns.}
 
 \item{sample_pattern}{Pattern to identify sample columns
 (default: "count").}
+
+\item{consequence_types}{Optional character vector of consequence types to
+filter on (requires a \code{Consequence} column in data). If NULL (default),
+no filtering is applied.}
 }
 \value{
 A numeric matrix with sequences as row names and samples as columns.
 }
 \description{
 Extracts sequence identifiers and sample counts into a numeric matrix
-suitable for differential analysis.
+suitable for differential analysis. Optionally filters by consequence type.
 }
 \details{
 The sample_pattern is used with \code{starts_with()} to select count columns.
@@ -27,6 +31,12 @@ named like "count_SAMPLE_A_10_pel0000", and "count" will match these.
 \examples{
 \dontrun{
 count_matrix <- create_count_matrix(annotated_data)
+
+# Filter to specific consequence types
+norm_matrix <- create_count_matrix(
+  annotated_data,
+  consequence_types = c("synonymous_variant", "intron_variant")
+)
 }
 
 }

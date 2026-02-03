@@ -163,7 +163,7 @@ run_differential_analysis <- function(count_matrix,
     dplyr::left_join(z_score, by = "SEQUENCE")
 
   # Continuous analysis for rate estimation
- if (include_rate) {
+  if (include_rate) {
     message("Running DESeq2 differential abundance analysis on ",
             "continuous data for rate estimation")
 
@@ -209,7 +209,7 @@ run_differential_analysis <- function(count_matrix,
   }
 
   # Return SGEResults object
- SGEResults(
+  SGEResults(
     results = res,
     rlog = rld,
     contrast_summary = all_contrast_summary,
@@ -290,7 +290,7 @@ calculate_median_scores <- function(data,
     dplyr::slice_head(n = 1)
 
   # Bind median columns to original data
- dplyr::bind_cols(data, medians)
+  dplyr::bind_cols(data, medians)
 }
 
 
@@ -535,7 +535,7 @@ post_process <- function(data,
                          targeton_id = NULL,
                          fdr_threshold = 0.01) {
   # Add Targeton_ID if not present and targeton_id is provided
- if (!"Targeton_ID" %in% names(data)) {
+  if (!"Targeton_ID" %in% names(data)) {
     if (is.null(targeton_id)) {
       stop("Targeton_ID column not found in data and targeton_id not provided")
     }
@@ -694,5 +694,5 @@ reweight_replicated_variants <- function(data, fdr_threshold = 0.01) {
     ) |>
     dplyr::select(-"total_weight", -"sum_weighted_lfc")
 
-  return(weighted_results)
+  weighted_results
 }

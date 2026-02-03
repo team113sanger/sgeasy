@@ -219,10 +219,10 @@ test_that("fetch_domains_ensembl fetches real data", {
 
 # Tests for plot_domain_heatmap() ----------------------------------------------
 
-test_that("plot_domain_heatmap requires domain_df or transcript_id", {
+test_that("plot_domain_heatmap requires uniprot_acc or domain_df", {
   expect_error(
     plot_domain_heatmap(mock_variant_data),
-    "Either 'domain_df' or 'transcript_id' must be provided"
+    "'uniprot_acc' required for TED API"
   )
 })
 

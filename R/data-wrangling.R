@@ -36,22 +36,21 @@ create_normalization_matrix <- function(data,
                                         consequence_types = c("synonymous_variant",
                                                               "intron_variant"),
                                         sample_pattern = "count") {
-  data |>
-    dplyr::filter(.data$Consequence %in% consequence_types) |>
-    dplyr::select("SEQUENCE", dplyr::starts_with(sample_pattern)) |>
-    tibble::column_to_rownames("SEQUENCE") |>
-    as.matrix()
+  create_count_matrix(data, sample_pattern, consequence_types)
 }
 
 
 #' Create count matrix from annotated data
 #'
 #' Extracts sequence identifiers and sample counts into a numeric matrix
-#' suitable for differential analysis.
+#' suitable for differential analysis. Optionally filters by consequence type.
 #'
 #' @param data A data frame with SEQUENCE column and sample count columns.
 #' @param sample_pattern Pattern to identify sample columns
 #'   (default: "count").
+#' @param consequence_types Optional character vector of consequence types to
+#'   filter on (requires a `Consequence` column in data). If NULL (default),
+#'   no filtering is applied.
 #'
 #' @return A numeric matrix with sequences as row names and samples as columns.
 #'
@@ -63,11 +62,23 @@ create_normalization_matrix <- function(data,
 #' @examples
 #' \dontrun{
 #' count_matrix <- create_count_matrix(annotated_data)
+#'
+#' # Filter to specific consequence types
+#' norm_matrix <- create_count_matrix(
+#'   annotated_data,
+#'   consequence_types = c("synonymous_variant", "intron_variant")
+#' )
 #' }
 #'
 #' @export
-create_count_matrix <- function(data, sample_pattern = "count") {
-  data |>
+create_count_matrix <- function(data,
+                                sample_pattern = "count",
+                                consequence_types = NULL) {
+  result <- data
+  if (!is.null(consequence_types)) {
+    result <- dplyr::filter(result, .data$Consequence %in% consequence_types)
+  }
+  result |>
     dplyr::select("SEQUENCE", dplyr::starts_with(sample_pattern)) |>
     tibble::column_to_rownames("SEQUENCE") |>
     as.matrix()

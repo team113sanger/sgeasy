@@ -139,6 +139,42 @@ classification_shapes <- c(
 )
 
 
+#' Shared scale and theme layers for SGE scatter plots
+#'
+#' Internal helper that returns a list of ggplot2 layers shared by
+#' \code{\link{plot_condition_scores}} and \code{\link{plot_gene_level}}.
+#'
+#' @param colours Named colour vector for consequence types.
+#' @param shapes Named shape vector for functional classifications.
+#' @param fdr_threshold FDR threshold for alpha legend labels.
+#'
+#' @return A list of ggplot2 scale and theme objects.
+#'
+#' @keywords internal
+.sge_scatter_scales <- function(colours, shapes, fdr_threshold) {
+  list(
+    ggplot2::scale_colour_manual(values = colours),
+    ggplot2::scale_fill_manual(values = colours),
+    ggplot2::scale_shape_manual(values = shapes),
+    ggplot2::scale_alpha_discrete(
+      labels = c(paste0("FDR > ", fdr_threshold),
+                 paste0("FDR <= ", fdr_threshold))
+    ),
+    ggplot2::theme_classic(),
+    ggplot2::theme(
+      axis.text.x = ggplot2::element_text(
+        angle = 90, vjust = 0.5, hjust = 1,
+        colour = "black", size = 10
+      ),
+      legend.title = ggplot2::element_blank(),
+      legend.position = "right",
+      legend.box = "vertical",
+      legend.margin = ggplot2::margin()
+    )
+  )
+}
+
+
 #' Plot z-scores for a single condition contrast
 #'
 #' Creates a waterfall-style scatter plot showing variant z-scores along
@@ -191,29 +227,10 @@ plot_condition_scores <- function(data,
       ggplot2::aes(alpha = .data[[fdr_col]] <= fdr_threshold),
       size = 1.5
     ) +
-    ggplot2::scale_colour_manual(values = colours) +
-    ggplot2::scale_fill_manual(values = colours) +
-    ggplot2::scale_shape_manual(values = shapes) +
-    ggplot2::scale_alpha_discrete(
-      labels = c(
-        paste0("FDR > ", fdr_threshold),
-        paste0("FDR <= ", fdr_threshold)
-      )
-    ) +
     ggplot2::xlab("GRCh38 coordinate") +
     ggplot2::ylab(paste0("z-score (", suffix, ")")) +
     ggplot2::ggtitle(paste("z-score Plot:", targeton_id, "-", suffix)) +
-    ggplot2::theme_classic() +
-    ggplot2::theme(
-      axis.text.x = ggplot2::element_text(
-        angle = 90, vjust = 0.5, hjust = 1,
-        colour = "black", size = 10
-      ),
-      legend.title = ggplot2::element_blank(),
-      legend.position = "right",
-      legend.box = "vertical",
-      legend.margin = ggplot2::margin()
-    )
+    .sge_scatter_scales(colours, shapes, fdr_threshold)
 }
 
 
@@ -251,6 +268,41 @@ plot_all_conditions <- function(data,
 }
 
 
+#' Save a list of plots to PNG files in a directory
+#'
+#' Internal helper that creates the output directory (if needed) and
+#' iterates over a named list, writing each element as a PNG.
+#'
+#' @param plot_list A named list of plot objects.
+#' @param output_dir Directory to write files to.
+#' @param suffix Character string appended to each name before
+#'   the \code{.png} extension.
+#' @param width Plot width in pixels.
+#' @param height Plot height in pixels.
+#' @param plot_fn A function that renders a single element from
+#'   \code{plot_list} to the current graphics device.
+#'
+#' @return \code{invisible(NULL)}.
+#'
+#' @keywords internal
+.save_plots_to_dir <- function(plot_list, output_dir,
+                               suffix, width, height,
+                               plot_fn) {
+  if (!dir.exists(output_dir)) {
+    dir.create(output_dir, recursive = TRUE)
+  }
+  purrr::iwalk(plot_list, ~ {
+    grDevices::png(
+      file.path(output_dir, paste0(.y, suffix, ".png")),
+      width = width, height = height
+    )
+    plot_fn(.x)
+    grDevices::dev.off()
+  })
+  invisible(NULL)
+}
+
+
 #' Write waterfall plots to files
 #'
 #' Saves a nested list of plots to PNG files.
@@ -273,23 +325,11 @@ write_waterfall_plots <- function(plot_list,
                                   output_dir = "results",
                                   width = 900,
                                   height = 600) {
-  if (!dir.exists(output_dir)) {
-    dir.create(output_dir, recursive = TRUE)
-  }
-
-  plot_list |>
-    purrr::list_flatten() |>
-    purrr::iwalk(~ {
-      grDevices::png(
-        file.path(output_dir, paste0(.y, ".png")),
-        width = width,
-        height = height
-      )
-      print(.x)
-      grDevices::dev.off()
-    })
-
-  invisible(NULL)
+  .save_plots_to_dir(
+    purrr::list_flatten(plot_list),
+    output_dir, "", width, height,
+    function(p) print(p)
+  )
 }
 
 
@@ -422,21 +462,11 @@ plot_distance_matrices <- function(rlog_list,
                                    output_dir = "results/qc",
                                    width = 900,
                                    height = 600) {
-  if (!dir.exists(output_dir)) {
-    dir.create(output_dir, recursive = TRUE)
-  }
-
-  purrr::iwalk(rlog_list, ~ {
-    grDevices::png(
-      file.path(output_dir, paste0(.y, "_sample_distance_matrix.png")),
-      width = width,
-      height = height
-    )
-    sample_distance_matrix(.x)
-    grDevices::dev.off()
-  })
-
-  invisible(NULL)
+  .save_plots_to_dir(
+    rlog_list, output_dir,
+    "_sample_distance_matrix", width, height,
+    function(x) sample_distance_matrix(x)
+  )
 }
 
 
@@ -465,22 +495,11 @@ plot_screen_pcas <- function(rlog_list,
                              width = 900,
                              height = 600,
                              intgroup = c("condition", "replicate")) {
-  if (!dir.exists(output_dir)) {
-    dir.create(output_dir, recursive = TRUE)
-  }
-
-  purrr::iwalk(rlog_list, ~ {
-    grDevices::png(
-      file.path(output_dir, paste0(.y, "_pca.png")),
-      width = width,
-      height = height
-    )
-    pca_plot <- build_sample_pca(.x, intgroup = intgroup)
-    print(pca_plot)
-    grDevices::dev.off()
-  })
-
-  invisible(NULL)
+  .save_plots_to_dir(
+    rlog_list, output_dir,
+    "_pca", width, height,
+    function(x) print(build_sample_pca(x, intgroup = intgroup))
+  )
 }
 
 
@@ -563,29 +582,10 @@ plot_gene_level <- function(data,
       ggplot2::aes(alpha = .data[[fdr_col]] <= fdr_threshold),
       size = point_size
     ) +
-    ggplot2::scale_colour_manual(values = colours) +
-    ggplot2::scale_fill_manual(values = colours) +
-    ggplot2::scale_shape_manual(values = shapes) +
-    ggplot2::scale_alpha_discrete(
-      labels = c(
-        paste0("FDR > ", fdr_threshold),
-        paste0("FDR <= ", fdr_threshold)
-      )
-    ) +
     ggplot2::xlab("GRCh38 coordinate") +
     ggplot2::ylab(score_label) +
     ggplot2::ggtitle(paste("Functional score:", gene_id)) +
-    ggplot2::theme_classic() +
-    ggplot2::theme(
-      axis.text.x = ggplot2::element_text(
-        angle = 90, vjust = 0.5, hjust = 1,
-        colour = "black", size = 10
-      ),
-      legend.title = ggplot2::element_blank(),
-      legend.position = "right",
-      legend.box = "vertical",
-      legend.margin = ggplot2::margin()
-    ) +
+    .sge_scatter_scales(colours, shapes, fdr_threshold) +
     ggplot2::facet_wrap(~ Exons, scales = "free_x", nrow = facet_nrow)
 }
 

@@ -56,7 +56,7 @@ estimate_size_factors <- function(count_data,
     DESeq2::estimateSizeFactors(dds)
   )
 
-  return(control_size_factors)
+  control_size_factors
 }
 
 
@@ -92,5 +92,5 @@ compute_control_size_factors <- function(count_matrix,
     min_row_sum = 10,
     reference_level = reference_level
   )
-  return(control_size_factors)
+  control_size_factors
 }
