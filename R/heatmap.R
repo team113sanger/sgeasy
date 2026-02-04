@@ -267,7 +267,7 @@ plot_domain_track <- function(domain_df,
         xmin = .data$start,
         xmax = .data$end,
         ymin = 0,
-        ymax = 1,
+        ymax = 0.5,
         fill = .data$domain
       ),
       color = "black",
@@ -275,7 +275,9 @@ plot_domain_track <- function(domain_df,
     ) +
     ggplot2::scale_x_continuous(limits = x_range, expand = c(0, 0)) +
     ggplot2::theme_classic() +
-    ggplot2::ylab("")
+    ggplot2::ylab("") +
+    ggplot2::facet_wrap(~.data$source, ncol = 1, strip.position = "right") +
+    ggplot2::theme(strip.text.y.right = ggplot2::element_text(angle = 0))
 
   # Apply custom colors if provided
   if (!is.null(domain_colors)) {
@@ -388,7 +390,7 @@ plot_plddt_track <- function(plddt_df,
     ggplot2::scale_x_continuous(limits = x_range, expand = c(0, 0)) +
     ggplot2::theme_classic() +
     ggplot2::ylab("") +
-    ggplot2::labs(fill = "pLDDT")
+    ggplot2::labs(fill = "AlphaFold Confidence")
 
   legend_position <- if (show_legend) "right" else "none"
 
