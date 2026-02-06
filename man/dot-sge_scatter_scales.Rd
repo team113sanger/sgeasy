@@ -18,6 +18,6 @@ A list of ggplot2 scale and theme objects.
 }
 \description{
 Internal helper that returns a list of ggplot2 layers shared by
-\code{\link{plot_condition_scores}} and \code{\link{plot_gene_level}}.
+\code{\link{plot_condition_scores}} and \code{\link{plot_gene_level_waterfall}}.
 }
 \keyword{internal}

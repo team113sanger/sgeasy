@@ -49,7 +49,7 @@ plot_sample_scatter <- function(data,
                                 title = "Regularized-log Transformed Read Count") {
 
   # Extract assay if DESeqTransform object
- if (inherits(data, "DESeqTransform")) {
+  if (inherits(data, "DESeqTransform")) {
     data <- SummarizedExperiment::assay(data)
   }
 
@@ -142,7 +142,7 @@ classification_shapes <- c(
 #' Shared scale and theme layers for SGE scatter plots
 #'
 #' Internal helper that returns a list of ggplot2 layers shared by
-#' \code{\link{plot_condition_scores}} and \code{\link{plot_gene_level}}.
+#' \code{\link{plot_condition_scores}} and \code{\link{plot_gene_level_waterfall}}.
 #'
 #' @param colours Named colour vector for consequence types.
 #' @param shapes Named shape vector for functional classifications.
@@ -503,91 +503,6 @@ plot_screen_pcas <- function(rlog_list,
 }
 
 
-#' Plot gene-level functional scores
-#'
-#' Creates a gene-level plot showing functional scores across all exons,
-#' with variants colored by consequence type and shaped by functional
-#' classification. Supports both raw and reweighted scores.
-#'
-#' @param data A data frame from [prepare_gene_level_data()]. Use
-#'   `$gene_data` for raw scores or `$combined` for reweighted scores.
-#' @param gene_id Gene identifier for the plot title.
-#' @param score_col Column name for the score to plot. For raw data use
-#'   e.g. "adj_lfc_continuous"; for reweighted use "combined_lfc".
-#' @param class_col Column name for functional classification. For raw data
-#'   use e.g. "functional_classification_continuous"; for reweighted use
-#'   "functional_classification".
-#' @param fdr_col Column name for FDR values. For raw data use
-#'   e.g. "FDR_continuous"; for reweighted use "FDR".
-#' @param score_label Label for the y-axis (default: "Functional score").
-#' @param fdr_threshold FDR threshold for alpha transparency (default: 0.01).
-#' @param colours Named vector of colors for slim_consequence values
-#'   (default: [consequence_colours]).
-#' @param shapes Named vector of shapes for functional_classification values
-#'   (default: [classification_shapes]).
-#' @param point_size Size of points (default: 1.5).
-#' @param facet_nrow Number of rows for exon faceting (default: 1).
-#'
-#' @return A ggplot object.
-#'
-#' @examples
-#' \dontrun{
-#' gene_results <- prepare_gene_level_data(processed_data)
-#'
-#' # Plot raw scores
-#' plot_gene_level(
-#'   data = gene_results$gene_data,
-#'   gene_id = "BRCA1",
-#'   score_col = "adj_lfc_continuous",
-#'   class_col = "functional_classification_continuous",
-#'   fdr_col = "FDR_continuous",
-#'   score_label = "Adjusted LFC"
-#' )
-#'
-#' # Plot reweighted scores
-#' plot_gene_level(
-#'   data = gene_results$combined,
-#'   gene_id = "BRCA1",
-#'   score_col = "combined_lfc",
-#'   class_col = "functional_classification",
-#'   fdr_col = "FDR",
-#'   score_label = "Weighted LFC"
-#' )
-#' }
-#'
-#' @seealso [prepare_gene_level_data()]
-#' @export
-plot_gene_level <- function(data,
-                            gene_id,
-                            score_col,
-                            class_col,
-                            fdr_col,
-                            score_label = "Functional score",
-                            fdr_threshold = 0.01,
-                            colours = consequence_colours,
-                            shapes = classification_shapes,
-                            point_size = 1.5,
-                            facet_nrow = 1) {
-  ggplot2::ggplot(
-    data,
-    ggplot2::aes(
-      x = .data$vcf_pos,
-      y = .data[[score_col]],
-      shape = .data[[class_col]],
-      colour = .data$slim_consequence,
-      fill = .data$slim_consequence
-    )
-  ) +
-    ggplot2::geom_point(
-      ggplot2::aes(alpha = .data[[fdr_col]] <= fdr_threshold),
-      size = point_size
-    ) +
-    ggplot2::xlab("GRCh38 coordinate") +
-    ggplot2::ylab(score_label) +
-    ggplot2::ggtitle(paste("Functional score:", gene_id)) +
-    .sge_scatter_scales(colours, shapes, fdr_threshold) +
-    ggplot2::facet_wrap(~ Exons, scales = "free_x", nrow = facet_nrow)
-}
 
 
 #' Plot position effect ratios
@@ -652,4 +567,402 @@ position_effect_plot <- function(pos_ratio,
 
   print(p)
   invisible(p)
+}
+
+
+# Ridgeline and Jitter Plot Functions -------------------------------------------
+
+#' Default consequence categories for distribution plots
+#'
+#' A character vector of VEP slim consequence types shown by default in
+#' ridgeline and jitter plots. The order determines the display order.
+#'
+#' @export
+default_consequences <- c(
+  "synonymous",
+  "UTR",
+  "missense",
+  "codon_deletion",
+  "stop_gained",
+  "frameshift",
+  "stop_lost",
+  "intron",
+  "splice_donor",
+  "splice_acceptor",
+  "start_lost"
+)
+
+#' Plot ridgeline density distributions by group
+#'
+#' Creates a ridgeline (joy) plot showing the density distribution of a
+#' numeric score across groups, with jittered data points overlaid.
+#' Useful for comparing score distributions across variant consequence
+#' categories.
+#'
+#' @param data A data frame containing the score and grouping columns.
+#' @param score_col Character. Name of the column containing the numeric
+#'   scores to plot on the x-axis.
+#' @param group_col Character. Name of the column containing the grouping
+#'   variable (e.g., consequence type) for the y-axis ridges.
+#' @param consequences Character vector. Only include rows where the
+#'   \code{group_col} value is in this vector. The factor levels of the
+#'   grouping variable will be set to this order. Set to \code{NULL} to
+#'   include all groups without filtering
+#'   (default: [default_consequences]).
+#' @param colours Named character vector of fill colours keyed by group
+#'   values (default: [consequence_colours]).
+#' @param xlab Character. X-axis label (default: value of \code{score_col}).
+#' @param ylab Character. Y-axis label (default: "Density").
+#' @param point_shape Shape for jittered points (default: "|").
+#' @param point_size Size for jittered points (default: 3).
+#' @param alpha Ridge fill transparency (default: 0.7).
+#'
+#' @return A ggplot object.
+#'
+#' @examples
+#' \dontrun{
+#' plot_ridgeline(
+#'   data = results,
+#'   score_col = "adj_score_condition_Day7_vs_Day4",
+#'   group_col = "slim_consequence"
+#' )
+#'
+#' # With specific consequences in a custom order
+#' plot_ridgeline(
+#'   data = results,
+#'   score_col = "adj_score_condition_Day7_vs_Day4",
+#'   group_col = "slim_consequence",
+#'   consequences = c("synonymous", "missense", "stop_gained"),
+#'   xlab = "z-score (Day7 vs Day4)",
+#'   ylab = "Consequence"
+#' )
+#' }
+#'
+#' @export
+plot_ridgeline <- function(data,
+                           score_col,
+                           group_col,
+                           consequences = default_consequences,
+                           colours = consequence_colours,
+                           xlab = score_col,
+                           ylab = "Density",
+                           point_shape = "|",
+                           point_size = 3,
+                           alpha = 0.7) {
+  if (!is.null(consequences)) {
+    data <- data[data[[group_col]] %in% consequences, , drop = FALSE]
+    data[[group_col]] <- factor(data[[group_col]], levels = consequences)
+  }
+
+  ggplot2::ggplot(
+    data,
+    ggplot2::aes(
+      x = .data[[score_col]],
+      y = .data[[group_col]]
+    )
+  ) +
+    ggridges::geom_density_ridges(
+      ggplot2::aes(fill = .data[[group_col]]),
+      jittered_points = TRUE,
+      position = ggridges::position_points_jitter(
+        width = 0.05, height = 0
+      ),
+      point_shape = point_shape,
+      point_size = point_size,
+      point_alpha = 1,
+      alpha = alpha
+    ) +
+    ggplot2::scale_fill_manual(values = colours) +
+    ggplot2::ylab(ylab) +
+    ggplot2::xlab(xlab) +
+    ggplot2::theme_classic() +
+    ggplot2::theme(legend.position = "none")
+}
+
+#' Plot jittered strip chart by group
+#'
+#' Creates a jitter (strip) plot showing individual data points grouped by
+#' a categorical variable, with optional median lines and FDR-based
+#' transparency. Inspired by Figure 1E of Olvera-Leon et al. (2024) Cell.
+#'
+#' @param data A data frame containing the score, grouping, and
+#'   optionally FDR columns.
+#' @param score_col Character. Name of the column containing the numeric
+#'   scores to plot on the y-axis.
+#' @param group_col Character. Name of the column containing the grouping
+#'   variable (e.g., consequence type) for the x-axis.
+#' @param consequences Character vector. Only include rows where the
+#'   \code{group_col} value is in this vector. The factor levels of the
+#'   grouping variable will be set to this order. Set to \code{NULL} to
+#'   include all groups without filtering
+#'   (default: [default_consequences]).
+#' @param fdr_col Character or NULL. Name of the column containing FDR
+#'   values. When provided, points with FDR >= \code{fdr_threshold} are
+#'   rendered semi-transparent.
+#' @param fdr_threshold Numeric. FDR cutoff for full opacity
+#'   (default: 0.01).
+#' @param colours Named character vector of point colours keyed by group
+#'   values (default: [consequence_colours]).
+#' @param xlab Character. X-axis label (default: value of \code{group_col}).
+#' @param ylab Character. Y-axis label (default: value of \code{score_col}).
+#' @param show_median Logical. Whether to draw a horizontal median line
+#'   per group (default: TRUE).
+#' @param point_size Size of jittered points (default: 1).
+#' @param jitter_width Width of horizontal jitter (default: 0.3).
+#'
+#' @return A ggplot object.
+#'
+#' @examples
+#' \dontrun{
+#' # Basic usage
+#' plot_consequence_jitter(
+#'   data = results,
+#'   score_col = "adj_score_condition_Day14_vs_Day4",
+#'   group_col = "slim_consequence"
+#' )
+#'
+#' # With FDR-based transparency and selected consequences
+#' plot_consequence_jitter(
+#'   data = results,
+#'   score_col = "adj_score_condition_Day14_vs_Day4",
+#'   group_col = "slim_consequence",
+#'   fdr_col = "FDR_condition_Day14_vs_Day4",
+#'   consequences = c("synonymous", "missense", "stop_gained", "frameshift"),
+#'   ylab = "z-score (D4-D14)"
+#' )
+#' }
+#'
+#' @export
+plot_consequence_jitter <- function(data,
+                                    score_col,
+                                    group_col,
+                                    consequences = default_consequences,
+                                    fdr_col = NULL,
+                                    fdr_threshold = 0.01,
+                                    colours = consequence_colours,
+                                    xlab = group_col,
+                                    ylab = score_col,
+                                    show_median = TRUE,
+                                    point_size = 1,
+                                    jitter_width = 0.3) {
+  if (!is.null(consequences)) {
+    data <- data[data[[group_col]] %in% consequences, , drop = FALSE]
+    data[[group_col]] <- factor(data[[group_col]], levels = consequences)
+  }
+
+  # Build alpha mapping based on FDR if provided
+  if (!is.null(fdr_col)) {
+    data$.alpha <- ifelse(data[[fdr_col]] < fdr_threshold, 1, 0.2)
+  } else {
+    data$.alpha <- 1
+  }
+
+  p <- ggplot2::ggplot(
+    data,
+    ggplot2::aes(
+      x = .data[[group_col]],
+      y = .data[[score_col]],
+      fill = .data[[group_col]]
+    )
+  ) +
+    ggplot2::geom_jitter(
+      ggplot2::aes(alpha = .data$.alpha),
+      width = jitter_width,
+      size = point_size,
+      shape = 21,
+      colour = "black",
+      stroke = 0.3
+    ) +
+    ggplot2::scale_alpha_identity() +
+    ggplot2::scale_fill_manual(values = colours) +
+    ggplot2::xlab(xlab) +
+    ggplot2::ylab(ylab) +
+    ggplot2::theme_classic() +
+    ggplot2::theme(
+      legend.position = "none",
+      axis.text.x = ggplot2::element_text(angle = 45, hjust = 1)
+    )
+
+  if (show_median) {
+    p <- p +
+      ggplot2::stat_summary(
+        fun = stats::median,
+        geom = "crossbar",
+        width = 0.5,
+        linewidth = 0.4,
+        colour = "black"
+      )
+  }
+
+  p
+}
+
+#' Plot functional scores along genomic coordinates
+#'
+#' Creates a waterfall-style scatter plot showing variant scores along
+#' genomic coordinates, colored by consequence type and shaped by
+#' functional classification. Supports optional faceting by a grouping
+#' variable such as exon. Column names are fully configurable.
+#'
+#' @param data A data frame containing the columns referenced by the
+#'   other parameters.
+#' @param score_col Character. Name of the column containing the numeric
+#'   score to plot on the y-axis.
+#' @param pos_col Character. Name of the column containing the genomic
+#'   coordinate for the x-axis (default: "vcf_pos").
+#' @param consequence_col Character. Name of the column containing
+#'   consequence annotations for colour mapping
+#'   (default: "slim_consequence").
+#' @param class_col Character or NULL. Name of the column containing
+#'   functional classifications for point shapes. If NULL, no shape
+#'   mapping is applied (default: "functional_classification").
+#' @param fdr_col Character or NULL. Name of the column containing FDR
+#'   values for alpha transparency. If NULL, all points are fully opaque
+#'   (default: "FDR").
+#' @param fdr_threshold Numeric. FDR cutoff for alpha transparency
+#'   (default: 0.01).
+#' @param facet_col Character or NULL. Name of the column to facet by
+#'   (e.g., "Exons"). If NULL, no faceting is applied (default: NULL).
+#' @param facet_nrow Integer. Number of rows in facet layout
+#'   (default: 1).
+#' @param title Character or NULL. Plot title. If NULL, no title is
+#'   shown (default: NULL).
+#' @param xlab Character. X-axis label (default: "GRCh38 coordinate").
+#' @param ylab Character. Y-axis label (default: value of
+#'   \code{score_col}).
+#' @param colours Named character vector of colours for consequence
+#'   values (default: [consequence_colours]).
+#' @param shapes Named numeric vector of shapes for classification
+#'   values (default: [classification_shapes]).
+#' @param point_size Numeric. Size of points (default: 1.5).
+#'
+#' @return A ggplot object.
+#'
+#' @examples
+#' \dontrun{
+#' plot_gene_level_waterfall(
+#'   data = combined_dataset,
+#'   score_col = "combined_lfc",
+#'   class_col = "functional_classification",
+#'   fdr_col = "FDR",
+#'   facet_col = "Exons",
+#'   title = "Functional score Plot: NUDCD3 - Weighted LFC",
+#'   ylab = "Functional score (Weighted LFC)"
+#' )
+#' }
+#'
+#' @export
+plot_gene_level_waterfall <- function(data,
+                                      score_col,
+                                      pos_col = "vcf_pos",
+                                      consequence_col = "slim_consequence",
+                                      class_col = "functional_classification",
+                                      fdr_col = "FDR",
+                                      fdr_threshold = 0.01,
+                                      facet_col = NULL,
+                                      facet_nrow = 1,
+                                      title = NULL,
+                                      xlab = "GRCh38 coordinate",
+                                      ylab = score_col,
+                                      colours = consequence_colours,
+                                      shapes = classification_shapes,
+                                      point_size = 1.5) {
+  mapping <- ggplot2::aes(
+    x = .data[[pos_col]],
+    y = .data[[score_col]],
+    colour = .data[[consequence_col]],
+    fill = .data[[consequence_col]]
+  )
+
+  if (!is.null(class_col)) {
+    mapping$shape <- ggplot2::aes(shape = .data[[class_col]])$shape
+  }
+
+  if (!is.null(fdr_col)) {
+    point_mapping <- ggplot2::aes(
+      alpha = .data[[fdr_col]] <= fdr_threshold
+    )
+  } else {
+    point_mapping <- NULL
+  }
+
+  p <- ggplot2::ggplot(data, mapping) +
+    ggplot2::geom_point(point_mapping, size = point_size) +
+    ggplot2::scale_colour_manual(values = colours) +
+    ggplot2::scale_fill_manual(values = colours) +
+    ggplot2::xlab(xlab) +
+    ggplot2::ylab(ylab) +
+    ggplot2::theme_classic() +
+    ggplot2::theme(
+      axis.text.x = ggplot2::element_text(
+        angle = 90, vjust = 0.5, hjust = 1,
+        colour = "black", size = 10
+      ),
+      legend.title = ggplot2::element_blank(),
+      legend.position = "right",
+      legend.box = "vertical",
+      legend.margin = ggplot2::margin()
+    )
+
+  if (!is.null(class_col)) {
+    p <- p + ggplot2::scale_shape_manual(values = shapes)
+  }
+
+  if (!is.null(fdr_col)) {
+    p <- p + ggplot2::scale_alpha_discrete(
+      labels = c(
+        paste0("FDR > ", fdr_threshold),
+        paste0("FDR <= ", fdr_threshold)
+      )
+    )
+  }
+
+  if (!is.null(title)) {
+    p <- p + ggplot2::ggtitle(title)
+  }
+
+  if (!is.null(facet_col)) {
+    p <- p + ggplot2::facet_wrap(
+      facet_col,
+      scales = "free_x",
+      nrow = facet_nrow
+    )
+  }
+
+  p
+}
+
+# Position Effect Plot Functions -----------------------------------------------
+
+#' Save position effect ratio plots to files
+#'
+#' Saves multiple position effect ratio plots to PNG files.
+#'
+#' @param pep_list A named list of data frames from
+#'   [calculate_position_effect()].
+#' @param output_dir Directory to save plots
+#'   (default: "results/plasmid_ratio").
+#' @param timepoint Character string specifying the timepoint
+#'   (default: "Day4").
+#' @param width Plot width in pixels (default: 900).
+#' @param height Plot height in pixels (default: 600).
+#'
+#' @return Invisibly returns NULL. Side effect: writes PNG files.
+#'
+#' @examples
+#' \dontrun{
+#' plot_position_effects(pep_list, output_dir = "results/plasmid_ratio")
+#' }
+#'
+#' @seealso [position_effect_plot()], [calculate_position_effect()]
+#' @export
+plot_position_effects <- function(pep_list,
+                                  output_dir = "results/plasmid_ratio",
+                                  timepoint = "Day4",
+                                  width = 900,
+                                  height = 600) {
+  .save_plots_to_dir(
+    pep_list, output_dir, "_ratio", width, height,
+    function(x) print(position_effect_plot(x, timepoint = timepoint))
+  )
 }

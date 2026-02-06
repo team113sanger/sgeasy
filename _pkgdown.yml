@@ -59,18 +59,22 @@ reference:
   - title: "Visualization"
     desc: "Plotting functions"
     contents:
-      - plot_gene_level
+      - plot_gene_level_waterfall
       - plot_condition_scores
       - plot_all_conditions
       - write_waterfall_plots
+      - plot_ridgeline
+      - plot_consequence_jitter
       - plot_sample_scatter
       - sample_distance_matrix
       - plot_distance_matrices
       - build_sample_pca
       - plot_screen_pcas
       - position_effect_plot
+      - plot_position_effects
       - consequence_colours
       - classification_shapes
+      - default_consequences
 
   - title: "Domain Visualization"
     desc: "Protein domain fetching and heatmap visualization"
@@ -83,10 +87,12 @@ reference:
       - filter_protein_altering_variants
       - prepare_amino_acid_heatmap_data
       - plot_domain_track
+      - plot_plddt_track
       - plot_amino_acid_heatmap
       - plot_domain_heatmap
       - amino_acid_order
       - classification_heatmap_colours
+      - plddt_colours
 
 articles:
   - title: "Getting Started"

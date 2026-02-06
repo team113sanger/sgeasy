@@ -52,21 +52,3 @@ NULL
 .onLoad <- function(libname, pkgname) {
   S7::methods_register()
 }
-
-# Suppress R CMD check notes for NSE variables
-utils::globalVariables(c(
-  "Consequence", "SEQUENCE", "total_counts", "condition",
-  "baseMean", "supplier_name", ".",
-  # New variables for reweighting functions
-  "HGVSc", "HGVSp", "pam_mut_sgrna_id", "lfcSE_continuous",
-  "adj_lfc_continuous", "sgRNA_id", "weight", "weighted_lfc",
-  "has_non_pam", "n_observations", "total_weight", "sum_weighted_lfc",
-  "combined_lfc", "combined_SE", "combined_Z", "pval",
-  # PCA variables
-  "PC1", "PC2",
-  # Domain and heatmap variables
-  "domain", "source", "start", "end", "ranges",
-  "AA_change", "Amino_acids", "Protein_position",
-  "new_aa", "previous", "mean_adj_score", "mean_FDR",
-  "mutator", "slim_consequence", "functional_classification"
-))

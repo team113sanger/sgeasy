@@ -40,8 +40,7 @@ fetch_domains_ensembl <- function(transcript_id,
   }
 
   # Get protein ID from transcript
-
-url <- paste0(
+  url <- paste0(
     "https://rest.ensembl.org/lookup/id/", transcript_id,
     "?content-type=application/json;expand=1"
   )
@@ -79,7 +78,7 @@ url <- paste0(
   )
 
   if (length(features) == 0) {
-    message("No domains found for this protein.")
+    logger::log_info("No domains found for this protein.")
     return(NULL)
   }
 
@@ -155,7 +154,7 @@ fetch_domains_interpro <- function(uniprot_acc,
   response <- httr::GET(url, httr::timeout(timeout))
 
   if (httr::status_code(response) == 404) {
-    message("UniProt accession not found in InterPro.")
+    logger::log_info("UniProt accession not found in InterPro.")
     return(NULL)
   }
 
@@ -169,7 +168,7 @@ fetch_domains_interpro <- function(uniprot_acc,
   )
 
   if (is.null(data$results) || length(data$results) == 0) {
-    message("No domains found for this protein.")
+    logger::log_info("No domains found for this protein.")
     return(NULL)
   }
 
@@ -228,7 +227,7 @@ fetch_domains_interpro <- function(uniprot_acc,
   domain_df <- do.call(rbind, results)
 
   if (is.null(domain_df) || nrow(domain_df) == 0) {
-    message("No domains found matching criteria.")
+    logger::log_info("No domains found matching criteria.")
     return(NULL)
   }
 
@@ -245,7 +244,7 @@ fetch_domains_interpro <- function(uniprot_acc,
       )
 
     if (nrow(domain_df) == 0) {
-      message("No domains found from specified sources.")
+      logger::log_info("No domains found from specified sources.")
       return(NULL)
     }
   }
@@ -307,7 +306,7 @@ fetch_domains_ted <- function(uniprot_acc,
   response <- httr::GET(url, httr::timeout(timeout))
 
   if (httr::status_code(response) == 404) {
-    message("UniProt accession not found in TED.")
+    logger::log_info("UniProt accession not found in TED.")
     return(NULL)
   }
 
@@ -320,7 +319,7 @@ fetch_domains_ted <- function(uniprot_acc,
   )
 
   if (is.null(data$data) || length(data$data) == 0) {
-    message("No domains found for this protein in TED.")
+    logger::log_info("No domains found for this protein in TED.")
     return(NULL)
   }
 
@@ -355,7 +354,7 @@ fetch_domains_ted <- function(uniprot_acc,
       dplyr::filter(.data$consensus_level %in% consensus_levels)
 
     if (nrow(domain_df) == 0) {
-      message("No domains found with specified consensus levels.")
+      logger::log_info("No domains found with specified consensus levels.")
       return(NULL)
     }
   }
@@ -415,7 +414,7 @@ fetch_plddt_alphafold <- function(uniprot_acc, timeout = 30) {
   response <- httr::GET(meta_url, httr::timeout(timeout))
 
   if (httr::status_code(response) == 404) {
-    message("UniProt accession not found in AlphaFold Database.")
+    logger::log_info("UniProt accession not found in AlphaFold Database.")
     return(NULL)
   }
 
@@ -440,7 +439,7 @@ fetch_plddt_alphafold <- function(uniprot_acc, timeout = 30) {
   }
 
   if (is.null(confidence_url) || is.na(confidence_url)) {
-    message("No confidence data available for this protein.")
+    logger::log_info("No confidence data available for this protein.")
     return(NULL)
   }
 

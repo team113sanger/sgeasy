@@ -74,7 +74,7 @@ run_differential_analysis <- function(count_matrix,
                                       alpha = 0.05,
                                       include_rate = TRUE,
                                       sample_prefix = "count_") {
-  message("Running DESeq2 differential abundance analysis on timepoint contrasts")
+  logger::log_info("Running DESeq2 differential abundance analysis on timepoint contrasts")
 
   # Build condition data for samples in the count matrix
   # Match column names to metadata by prepending the sample_prefix
@@ -164,8 +164,7 @@ run_differential_analysis <- function(count_matrix,
 
   # Continuous analysis for rate estimation
   if (include_rate) {
-    message("Running DESeq2 differential abundance analysis on ",
-            "continuous data for rate estimation")
+    logger::log_info("Running DESeq2 differential abundance analysis on continuous data for rate estimation")
 
     # Estimate size factors for continuous design
     continuous_size_factors <- estimate_size_factors(

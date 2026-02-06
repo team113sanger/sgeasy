@@ -277,7 +277,8 @@ plot_domain_track <- function(domain_df,
     ggplot2::theme_classic() +
     ggplot2::ylab("") +
     ggplot2::facet_wrap(~.data$source, ncol = 1, strip.position = "right") +
-    ggplot2::theme(strip.text.y.right = ggplot2::element_text(angle = 0))
+    ggplot2::theme(strip.text.y.right = ggplot2::element_text(angle = 0)) +
+    ggplot2::labs(fill = "Annotated Region")
 
   # Apply custom colors if provided
   if (!is.null(domain_colors)) {
@@ -293,8 +294,7 @@ plot_domain_track <- function(domain_df,
         axis.text.y = ggplot2::element_blank(),
         axis.ticks.y = ggplot2::element_blank(),
         axis.line.y = ggplot2::element_blank(),
-        legend.position = legend_position,
-        legend.title = ggplot2::element_blank()
+        legend.position = legend_position
       ),
       ggplot2::xlab("Protein position")
     )
@@ -307,8 +307,7 @@ plot_domain_track <- function(domain_df,
         axis.ticks.y = ggplot2::element_blank(),
         axis.line.y = ggplot2::element_blank(),
         axis.line.x = ggplot2::element_blank(),
-        legend.position = legend_position,
-        legend.title = ggplot2::element_blank()
+        legend.position = legend_position
       ),
       ggplot2::xlab("")
     )
@@ -375,7 +374,7 @@ plot_plddt_track <- function(plddt_df,
         y = 0.5,
         fill = .data$confidence_category
       ),
-      height = 1
+      height = 0.5
     ) +
     ggplot2::scale_fill_manual(
       values = plddt_colors,

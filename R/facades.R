@@ -73,7 +73,6 @@ load_sge_data <- function(count_files,
     }
   }
 
-
   logger::log_debug("Found {length(count_files)} count files")
 
   # Read counts
@@ -183,7 +182,7 @@ prepare_count_matrices <- function(data,
   logger::log_info("Preparing count matrices...")
 
   # Extract from SGEData if provided
- if (inherits(data, "sgeasy::SGEData")) {
+  if (inherits(data, "sgeasy::SGEData")) {
     complete_dataset <- data@complete_dataset
     if (is.null(annotation)) {
       annotation <- data@annotation
@@ -279,13 +278,11 @@ prepare_count_matrices <- function(data,
     create_normalization_matrix
   )
 
-
   logger::log_debug("Creating complete matrices...")
   complete_matrices <- purrr::map(
     annotated_counts,
     create_count_matrix
   )
-
 
   logger::log_info("Done preparing count matrices")
 
@@ -359,7 +356,6 @@ analyze_screens <- function(complete_matrices,
     ...
   )
 
-
   logger::log_debug("Combining contrast tables...")
   contrast_tables <- purrr::map_dfr(
     deseq_results,
@@ -368,7 +364,6 @@ analyze_screens <- function(complete_matrices,
   )
 
   rlog_results <- purrr::map(deseq_results, \(x) x@rlog)
-
 
   logger::log_info("Analysis complete for {length(deseq_results)} targeton(s)")
 
@@ -423,7 +418,6 @@ generate_qc_plots <- function(rlog_results,
     plots$pca <- purrr::map(rlog_results, build_sample_pca)
     plot_screen_pcas(rlog_results, output_dir = output_dir)
   }
-
 
   logger::log_info("QC plots saved to: {output_dir}")
   invisible(plots)
@@ -599,7 +593,7 @@ prepare_gene_level_data <- function(data,
                                     fdr_threshold = 0.01) {
   logger::log_info("Preparing gene-level dataset...")
 
- # Create exon annotations
+  # Create exon annotations
   logger::log_debug("Extracting exon annotations...")
   exon_annotations <- data |>
     dplyr::select("Targeton_ID", dplyr::all_of(exon_col)) |>

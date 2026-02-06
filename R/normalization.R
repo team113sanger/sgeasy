@@ -38,7 +38,7 @@ estimate_size_factors <- function(count_data,
                                   design = "~ condition",
                                   min_row_sum = 10,
                                   reference_level = NULL) {
-  message("Estimating size factors...")
+  logger::log_info("Estimating size factors...")
 
   dds <- DESeq2::DESeqDataSetFromMatrix(
     countData = count_data,
