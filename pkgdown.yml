@@ -1,0 +1,9 @@
+pandoc: 3.1.11
+pkgdown: 2.2.0
+pkgdown_sha: ~
+articles:
+  sge-analysis-workflow: sge-analysis-workflow.html
+last_built: 2026-02-06T08:48Z
+urls:
+  reference: https://github.com/team113sanger/sgeasy/reference
+  article: https://github.com/team113sanger/sgeasy/articles
