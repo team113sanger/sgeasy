@@ -201,38 +201,228 @@ slim_consequence <- function(data) {
 
 #' Calculate position effect ratios
 #'
-#' Calculates the ratio of counts between a specified timepoint and Day0
-#' for each sequence, grouped by NAME and condition.
+#' Calculates the ratio of mean counts between a specified timepoint and a
+#' reference condition for each sequence. Counts are averaged across
+#' replicates within each condition before computing the ratio.
 #'
-#' @param dataframe A data frame with COUNT, condition, NAME, and SEQUENCE columns.
-#' @param annotation A data frame with sequence annotations containing a Seq column.
-#' @param timepoint Character string specifying the timepoint to compare against Day0
-#'   (e.g., "Day10", "Day14").
+#' @param dataframe A data frame with COUNT, condition, NAME, SEQUENCE, and
+#'   targeton_id columns.
+#' @param annotation A data frame with sequence annotations containing Seq
+#'   and Targeton_ID columns.
+#' @param timepoint Character string specifying the numerator timepoint
+#'   (e.g., "Day4", "Day10").
+#' @param reference Character string specifying the denominator condition
+#'   (default: "Day0").
 #'
 #' @return A data frame with mean counts per condition, ratio calculations,
-#'   and joined annotation data.
+#'   and joined annotation data including Targeton_ID and vcf_pos.
 #'
 #' @examples
 #' \dontrun{
 #' pos_effect <- calculate_position_effect(
 #'   dataframe = count_data,
 #'   annotation = annotation_df,
-#'   timepoint = "Day10"
+#'   timepoint = "Day4"
+#' )
+#'
+#' # Using Day4 as reference instead of plasmid
+#' pos_effect <- calculate_position_effect(
+#'   dataframe = count_data,
+#'   annotation = annotation_df,
+#'   timepoint = "Day10",
+#'   reference = "Day4"
 #' )
 #' }
 #'
 #' @export
-calculate_position_effect <- function(dataframe, annotation, timepoint) {
+calculate_position_effect <- function(dataframe, annotation, timepoint,
+                                      reference = "Day0") {
   pos_ratio <- dataframe |>
-    dplyr::filter(.data$condition %in% c("Day0", timepoint)) |>
-    dplyr::group_by(.data$NAME, .data$condition, .data$SEQUENCE) |>
+    dplyr::filter(.data$condition %in% c(reference, timepoint)) |>
+    dplyr::group_by(.data$targeton_id, .data$NAME, .data$condition,
+                    .data$SEQUENCE) |>
     dplyr::summarise(mean_counts = mean(.data$COUNT), .groups = "drop") |>
     tidyr::pivot_wider(names_from = "condition", values_from = "mean_counts") |>
-    dplyr::mutate(ratio = .data[[timepoint]] / .data$Day0) |>
+    dplyr::mutate(ratio = .data[[timepoint]] / .data[[reference]]) |>
     dplyr::ungroup()
 
   pos_ratio <- pos_ratio |>
-    dplyr::left_join(annotation, by = c("SEQUENCE" = "Seq"))
+    dplyr::left_join(
+      annotation,
+      by = c("SEQUENCE" = "Seq", "targeton_id" = "Targeton_ID")
+    )
 
   pos_ratio
+}
+
+
+#' Extend a loess fit to cover edge positions
+#'
+#' Fills NA values at the start and end of a fitted vector with the nearest
+#' non-NA value. Interior NAs are left unchanged. This handles cases where
+#' the loess prediction cannot extrapolate beyond the range of the training
+#' data.
+#'
+#' @param fit_vector A numeric vector of fitted values, possibly with NAs at
+#'   the edges.
+#'
+#' @return A numeric vector of the same length with edge NAs filled.
+#'
+#' @keywords internal
+extend_loess_fit <- function(fit_vector) {
+  if (!any(is.na(fit_vector))) return(fit_vector)
+
+  valid_idx <- which(!is.na(fit_vector))
+  if (length(valid_idx) == 0) return(fit_vector)
+
+  first_valid <- min(valid_idx)
+  last_valid <- max(valid_idx)
+
+  out <- fit_vector
+  if (first_valid > 1) {
+    out[1:(first_valid - 1)] <- fit_vector[first_valid]
+  }
+  if (last_valid < length(fit_vector)) {
+    out[(last_valid + 1):length(fit_vector)] <- fit_vector[last_valid]
+  }
+  out
+}
+
+
+#' Correct for positional effects using neutral variants
+#'
+#' Fits a loess regression on neutral (e.g. synonymous) variants' log2 ratios
+#' as a function of genomic position, then subtracts the fitted positional
+#' bias from all variants. This is performed independently per targeton.
+#'
+#' This is analogous to the median-based LFC adjustment performed by
+#' [calculate_median_scores()], but operates in the spatial dimension
+#' rather than as a single global correction.
+#'
+#' @param pos_ratio A data frame from [calculate_position_effect()] containing
+#'   at minimum: \code{ratio}, \code{vcf_pos}, \code{Consequence}, and
+#'   \code{targeton_id} columns.
+#' @param neutral_variants Character vector of VEP consequence types to use
+#'   as the neutral reference (default: \code{"synonymous_variant"}).
+#' @param span Loess span parameter controlling smoothness of the fit.
+#'   Lower values produce more local fits that capture cut-site effects;
+#'   higher values produce smoother global trends (default: 0.3).
+#' @param min_neutral Minimum number of neutral variants with valid ratios
+#'   required to fit the model. Targetons with fewer neutral variants will
+#'   not be corrected and a warning is issued (default: 20).
+#'
+#' @return The input data frame with additional columns:
+#'   \describe{
+#'     \item{pos_effect}{The fitted positional bias (log2 scale) at each
+#'       variant's position}
+#'     \item{corrected_log2_ratio}{log2(ratio) minus the positional effect}
+#'   }
+#'
+#' @examples
+#' \dontrun{
+#' pos_data <- calculate_position_effect(count_data, annotation, "Day4")
+#' corrected <- correct_position_effect(pos_data)
+#'
+#' # With custom parameters
+#' corrected <- correct_position_effect(
+#'   pos_data,
+#'   neutral_variants = c("synonymous_variant", "intron_variant"),
+#'   span = 0.15
+#' )
+#' }
+#'
+#' @seealso [calculate_position_effect()], [calculate_median_scores()]
+#' @export
+correct_position_effect <- function(pos_ratio,
+                                    neutral_variants = c("synonymous_variant"),
+                                    span = 0.3,
+                                    min_neutral = 20) {
+  if (!"targeton_id" %in% names(pos_ratio)) {
+    stop("pos_ratio must contain a targeton_id column")
+  }
+
+  targetons <- split(pos_ratio, pos_ratio$targeton_id)
+
+  purrr::map_dfr(targetons, function(tgt_data) {
+    .fit_targeton_position_effect(
+      tgt_data, neutral_variants, span, min_neutral
+    )
+  })
+}
+
+
+#' Fit positional effect model for a single targeton
+#'
+#' @param data Data frame for a single targeton with ratio, vcf_pos, and
+#'   Consequence columns.
+#' @param neutral_variants Character vector of neutral consequence types.
+#' @param span Loess span parameter.
+#' @param min_neutral Minimum number of neutral variants required.
+#'
+#' @return Data frame with \code{pos_effect} and \code{corrected_log2_ratio}
+#'   columns added.
+#'
+#' @keywords internal
+.fit_targeton_position_effect <- function(data, neutral_variants,
+                                          span, min_neutral) {
+  targeton_id <- unique(data$targeton_id)
+
+
+  # Filter to neutral variants with valid ratios, excluding PAM mutations
+  neutral_data <- data |>
+    dplyr::filter(
+      .data$Consequence %in% neutral_variants,
+      is.na(.data$pam_mut_sgrna_id) | .data$pam_mut_sgrna_id == "",
+      is.finite(.data$ratio),
+      .data$ratio > 0
+    )
+
+  if (nrow(neutral_data) < min_neutral) {
+    warning(
+      "Targeton '", targeton_id, "' has only ", nrow(neutral_data),
+      " neutral variants (minimum: ", min_neutral, "). ",
+      "Skipping positional correction.",
+      call. = FALSE
+    )
+    data$pos_effect <- NA_real_
+    data$corrected_log2_ratio <- dplyr::if_else(
+      is.finite(data$ratio) & data$ratio > 0,
+      log2(data$ratio),
+      NA_real_
+    )
+    return(data)
+  }
+
+  # Build position sequence spanning all variants
+  all_positions <- data$vcf_pos[!is.na(data$vcf_pos)]
+  pos_range <- range(all_positions)
+  pos_seq <- seq(from = pos_range[1], to = pos_range[2])
+
+  # Fit loess on neutral variants only
+  lo <- stats::loess(
+    log2(ratio) ~ vcf_pos,
+    data = neutral_data,
+    span = span
+  )
+
+  # Predict across full position range and extend edges
+  pred <- stats::predict(lo, newdata = data.frame(vcf_pos = pos_seq))
+  pred <- extend_loess_fit(pred)
+
+  # Create lookup table
+  pos_effect_lookup <- data.frame(
+    vcf_pos = pos_seq,
+    pos_effect = pred
+  )
+
+  # Join positional effect and compute corrected ratio
+  data |>
+    dplyr::left_join(pos_effect_lookup, by = "vcf_pos") |>
+    dplyr::mutate(
+      corrected_log2_ratio = dplyr::if_else(
+        is.finite(.data$ratio) & .data$ratio > 0,
+        log2(.data$ratio) - .data$pos_effect,
+        NA_real_
+      )
+    )
 }

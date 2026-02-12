@@ -505,6 +505,32 @@ plot_screen_pcas <- function(rlog_list,
 
 
 
+#' Tag PAM mutation variants for plotting
+#'
+#' Overrides \code{slim_consequence} to \code{"PPE codon"} for variants
+#' with a non-empty \code{pam_mut_sgrna_id}, so they appear as a distinct
+#' category in position effect plots.
+#'
+#' @param data A data frame with \code{slim_consequence} and
+#'   \code{pam_mut_sgrna_id} columns.
+#'
+#' @return Data frame with \code{slim_consequence} updated for PAM variants.
+#'
+#' @keywords internal
+.tag_pam_variants <- function(data) {
+  if (!"pam_mut_sgrna_id" %in% names(data)) return(data)
+
+  data |>
+    dplyr::mutate(
+      slim_consequence = dplyr::if_else(
+        !is.na(.data$pam_mut_sgrna_id) & .data$pam_mut_sgrna_id != "",
+        "PPE codon",
+        .data$slim_consequence
+      )
+    )
+}
+
+
 #' Plot position effect ratios
 #'
 #' Creates a scatter plot showing the ratio of counts at a specified timepoint
@@ -530,8 +556,11 @@ plot_screen_pcas <- function(rlog_list,
 position_effect_plot <- function(pos_ratio,
                           timepoint,
                           colours = consequence_colours) {
+  plot_data <- .tag_pam_variants(pos_ratio)
+  colours <- c(colours, "PPE codon" = "black")
+
   p <- ggplot2::ggplot(
-    pos_ratio,
+    plot_data,
     ggplot2::aes(
       x = .data$vcf_pos,
       y = .data$ratio,
@@ -564,6 +593,109 @@ position_effect_plot <- function(pos_ratio,
       legend.box = "vertical",
       legend.margin = ggplot2::margin()
     )
+
+  print(p)
+  invisible(p)
+}
+
+
+#' Plot position effect correction
+#'
+#' Creates a two-panel plot showing the raw and corrected log2 ratios
+#' across genomic position. The top panel displays the raw log2(ratio)
+#' with the synonymous-only loess fit overlaid; the bottom panel shows
+#' the corrected values after subtracting the positional effect.
+#'
+#' @param corrected_data A data frame from [correct_position_effect()]
+#'   containing \code{vcf_pos}, \code{ratio}, \code{corrected_log2_ratio},
+#'   \code{pos_effect}, and \code{slim_consequence} columns.
+#' @param colours Named character vector of colours for consequence types
+#'   (default: \code{consequence_colours}).
+#'
+#' @return A combined ggplot object (printed and returned invisibly).
+#'
+#' @examples
+#' \dontrun{
+#' pos_data <- calculate_position_effect(count_data, annotation, "Day4")
+#' corrected <- correct_position_effect(pos_data) |> slim_consequence()
+#' corrected_position_effect_plot(corrected)
+#' }
+#'
+#' @seealso [correct_position_effect()], [position_effect_plot()]
+#' @export
+corrected_position_effect_plot <- function(corrected_data,
+                                           colours = consequence_colours) {
+  plot_data <- .tag_pam_variants(corrected_data)
+  colours <- c(colours, "PPE codon" = "black")
+
+  # Raw ratios with loess fit
+  p_raw <- ggplot2::ggplot(
+    plot_data,
+    ggplot2::aes(
+      x = .data$vcf_pos,
+      y = log2(.data$ratio),
+      color = .data$slim_consequence
+    )
+  ) +
+    ggplot2::geom_point(size = 1, alpha = 0.5) +
+    ggplot2::scale_colour_manual(values = colours) +
+    ggplot2::geom_line(
+      ggplot2::aes(x = .data$vcf_pos, y = .data$pos_effect),
+      color = "black",
+      linewidth = 1,
+      inherit.aes = FALSE,
+      data = plot_data |>
+        dplyr::filter(!is.na(.data$pos_effect)) |>
+        dplyr::distinct(.data$vcf_pos, .data$pos_effect)
+    ) +
+    ggplot2::theme_classic() +
+    ggplot2::xlab("GRCh38 Genomic Coordinate") +
+    ggplot2::ylab("log2(ratio)") +
+    ggplot2::ggtitle("Raw (with synonymous loess fit)") +
+    ggplot2::theme(
+      axis.text.x = ggplot2::element_text(
+        angle = 90, vjust = 0.5, hjust = 1,
+        colour = "black", size = 10
+      ),
+      legend.title = ggplot2::element_blank(),
+      legend.position = "right",
+      legend.box = "vertical",
+      legend.margin = ggplot2::margin()
+    )
+
+  # Corrected ratios
+  p_corrected <- ggplot2::ggplot(
+    plot_data,
+    ggplot2::aes(
+      x = .data$vcf_pos,
+      y = .data$corrected_log2_ratio,
+      color = .data$slim_consequence
+    )
+  ) +
+    ggplot2::geom_point(size = 1, alpha = 0.5) +
+    ggplot2::scale_colour_manual(values = colours) +
+    ggplot2::geom_hline(yintercept = 0, linetype = "dashed", color = "grey40") +
+    ggplot2::theme_classic() +
+    ggplot2::xlab("GRCh38 Genomic Coordinate") +
+    ggplot2::ylab("Corrected log2(ratio)") +
+    ggplot2::ggtitle("Position-corrected") +
+    ggplot2::theme(
+      axis.text.x = ggplot2::element_text(
+        angle = 90, vjust = 0.5, hjust = 1,
+        colour = "black", size = 10
+      ),
+      legend.title = ggplot2::element_blank(),
+      legend.position = "right",
+      legend.box = "vertical",
+      legend.margin = ggplot2::margin()
+    )
+
+  p <- ggpubr::ggarrange(
+    p_raw, p_corrected,
+    ncol = 1, nrow = 2,
+    common.legend = TRUE,
+    legend = "right"
+  )
 
   print(p)
   invisible(p)

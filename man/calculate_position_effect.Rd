@@ -4,30 +4,44 @@
 \alias{calculate_position_effect}
 \title{Calculate position effect ratios}
 \usage{
-calculate_position_effect(dataframe, annotation, timepoint)
+calculate_position_effect(dataframe, annotation, timepoint, reference = "Day0")
 }
 \arguments{
-\item{dataframe}{A data frame with COUNT, condition, NAME, and SEQUENCE columns.}
+\item{dataframe}{A data frame with COUNT, condition, NAME, SEQUENCE, and
+targeton_id columns.}
 
-\item{annotation}{A data frame with sequence annotations containing a Seq column.}
+\item{annotation}{A data frame with sequence annotations containing Seq
+and Targeton_ID columns.}
 
-\item{timepoint}{Character string specifying the timepoint to compare against Day0
-(e.g., "Day10", "Day14").}
+\item{timepoint}{Character string specifying the numerator timepoint
+(e.g., "Day4", "Day10").}
+
+\item{reference}{Character string specifying the denominator condition
+(default: "Day0").}
 }
 \value{
 A data frame with mean counts per condition, ratio calculations,
-and joined annotation data.
+and joined annotation data including Targeton_ID and vcf_pos.
 }
 \description{
-Calculates the ratio of counts between a specified timepoint and Day0
-for each sequence, grouped by NAME and condition.
+Calculates the ratio of mean counts between a specified timepoint and a
+reference condition for each sequence. Counts are averaged across
+replicates within each condition before computing the ratio.
 }
 \examples{
 \dontrun{
 pos_effect <- calculate_position_effect(
   dataframe = count_data,
   annotation = annotation_df,
-  timepoint = "Day10"
+  timepoint = "Day4"
+)
+
+# Using Day4 as reference instead of plasmid
+pos_effect <- calculate_position_effect(
+  dataframe = count_data,
+  annotation = annotation_df,
+  timepoint = "Day10",
+  reference = "Day4"
 )
 }
 
