@@ -695,3 +695,368 @@ reweight_replicated_variants <- function(data, fdr_threshold = 0.01) {
 
   weighted_results
 }
+
+
+#' Test variants using position-corrected ratios
+#'
+#' Performs empirical null testing on position-corrected log2 ratios by
+#' estimating the null distribution from neutral variants within each targeton.
+#' Z-scores are computed per targeton and FDR correction is applied globally.
+#'
+#' @param data A data frame from [correct_position_effect()] containing
+#'   `corrected_log2_ratio`, `Consequence`, `targeton_id`, and
+#'   `pam_mut_sgrna_id` columns.
+#' @param neutral_variants Character vector of VEP consequence types to use
+#'   as the neutral reference for estimating the null SD
+#'   (default: \code{c("synonymous_variant")}).
+#' @param fdr_threshold FDR threshold for significance classification
+#'   (default: 0.01).
+#'
+#' @return The input data frame with additional columns:
+#'   \describe{
+#'     \item{pos_z_score}{Z-score of corrected_log2_ratio relative to
+#'       neutral variant SD within the same targeton}
+#'     \item{pos_pval}{Two-sided p-value from the normal distribution}
+#'     \item{pos_FDR}{Benjamini-Hochberg adjusted p-value (across all
+#'       targetons)}
+#'     \item{pos_classification}{Functional classification: "depleted",
+#'       "enriched", or "unchanged"}
+#'   }
+#'
+#' @details
+#' This function provides a simple alternative to DESeq2-based testing
+#' for position-corrected data. For each targeton:
+#' \enumerate{
+#'   \item Computes the standard deviation of `corrected_log2_ratio` from
+#'     neutral variants (excluding PAM-impacted variants)
+#'   \item Computes z-scores for all variants as corrected_log2_ratio / SD
+#'   \item Computes two-sided p-values from the standard normal distribution
+#' }
+#' FDR correction (BH method) is then applied across all targetons combined.
+#'
+#' @examples
+#' \dontrun{
+#' pos_data <- calculate_position_effect(count_data, annotation, "Day4")
+#' corrected <- correct_position_effect(pos_data)
+#' tested <- test_position_corrected(corrected)
+#' }
+#'
+#' @seealso [correct_position_effect()], [run_positional_differential_analysis()]
+#' @export
+test_position_corrected <- function(data,
+                                    neutral_variants = c("synonymous_variant"),
+                                    fdr_threshold = 0.01) {
+  if (!"corrected_log2_ratio" %in% names(data)) {
+    stop("data must contain a corrected_log2_ratio column (from correct_position_effect())")
+  }
+  if (!"targeton_id" %in% names(data)) {
+    stop("data must contain a targeton_id column")
+  }
+
+  targetons <- split(data, data$targeton_id)
+
+  combined <- purrr::map_dfr(targetons, function(tgt_data) {
+    .test_targeton_position_effect(tgt_data, neutral_variants)
+  })
+
+  # Apply FDR correction across all targetons
+  combined <- combined |>
+    dplyr::mutate(
+      pos_FDR = stats::p.adjust(.data$pos_pval, method = "BH"),
+      pos_classification = dplyr::case_when(
+        .data$pos_FDR < fdr_threshold & .data$pos_z_score < 0 ~ "depleted",
+        .data$pos_FDR < fdr_threshold & .data$pos_z_score > 0 ~ "enriched",
+        is.na(.data$pos_FDR) ~ NA_character_,
+        TRUE ~ "unchanged"
+      )
+    )
+
+  combined
+}
+
+
+#' Test position-corrected ratios for a single targeton
+#'
+#' Computes z-scores and raw p-values for one targeton using the neutral
+#' variant SD as the empirical null.
+#'
+#' @param data Data frame for a single targeton with `corrected_log2_ratio`,
+#'   `Consequence`, and `pam_mut_sgrna_id` columns.
+#' @param neutral_variants Character vector of neutral consequence types.
+#'
+#' @return Data frame with `pos_z_score` and `pos_pval` columns added.
+#'
+#' @keywords internal
+.test_targeton_position_effect <- function(data, neutral_variants) {
+  targeton_id <- unique(data$targeton_id)
+
+  # Compute SD from neutral variants, excluding PAM-impacted
+
+  neutral_vals <- data |>
+    dplyr::filter(
+      .data$Consequence %in% neutral_variants,
+      is.na(.data$pam_mut_sgrna_id) | .data$pam_mut_sgrna_id == "",
+      is.finite(.data$corrected_log2_ratio)
+    ) |>
+    dplyr::pull(.data$corrected_log2_ratio)
+
+  if (length(neutral_vals) < 3) {
+    warning(
+      "Targeton '", targeton_id, "' has only ", length(neutral_vals),
+      " valid neutral variants for SD estimation. ",
+      "Skipping statistical testing.",
+      call. = FALSE
+    )
+    data$pos_z_score <- NA_real_
+    data$pos_pval <- NA_real_
+    return(data)
+  }
+
+  sd_neutral <- stats::sd(neutral_vals)
+
+  if (is.na(sd_neutral) || sd_neutral == 0) {
+    warning(
+      "Targeton '", targeton_id, "' has zero variance in neutral variants. ",
+      "Skipping statistical testing.",
+      call. = FALSE
+    )
+    data$pos_z_score <- NA_real_
+    data$pos_pval <- NA_real_
+    return(data)
+  }
+
+  data |>
+    dplyr::mutate(
+      pos_z_score = .data$corrected_log2_ratio / sd_neutral,
+      pos_pval = stats::pnorm(abs(.data$pos_z_score), lower.tail = FALSE) * 2
+    )
+}
+
+
+#' Run position-aware DESeq2 differential analysis
+#'
+#' Wraps [run_differential_analysis()] but incorporates position effects
+#' as per-gene normalization factor offsets. This allows DESeq2's Wald tests
+#' to account for positional bias in the count data.
+#'
+#' @inheritParams run_differential_analysis
+#' @param pos_effect_data A data frame with at minimum `SEQUENCE` and
+#'   `pos_effect` columns (e.g., from [correct_position_effect()] after
+#'   renaming). The `pos_effect` values are the fitted positional biases
+#'   on the log2 scale.
+#'
+#' @return An [SGEResults] object, identical in structure to
+#'   [run_differential_analysis()] output.
+#'
+#' @details
+#' The function modifies the standard DESeq2 pipeline by replacing scalar
+#' size factors with a full normalization factor matrix:
+#' \enumerate{
+#'   \item Computes base size factors from neutral variants (as usual)
+#'   \item Constructs a normalization matrix where
+#'     \code{norm[i,j] = size_factor[j] * 2^pos_effect[i]}
+#'   \item Sets \code{DESeq2::normalizationFactors(dds)} instead of
+#'     \code{sizeFactors(dds)}
+#'   \item Runs DESeq2 as normal — Wald tests now account for positional bias
+#' }
+#'
+#' Variants not found in `pos_effect_data` receive a positional offset of 0
+#' (i.e., no correction). The downstream pipeline
+#' ([recalculate_screen_statistics()], [classify_all_contrasts()], etc.)
+#' works unchanged on the output.
+#'
+#' @examples
+#' \dontrun{
+#' pos_data <- calculate_position_effect(count_data, annotation, "Day4")
+#' corrected <- correct_position_effect(pos_data)
+#'
+#' # Prepare pos_effect_data with SEQUENCE and pos_effect columns
+#' pos_effects <- corrected |>
+#'   dplyr::select(SEQUENCE = Seq, pos_effect) |>
+#'   dplyr::distinct()
+#'
+#' results <- run_positional_differential_analysis(
+#'   count_matrix = counts,
+#'   normalization_matrix = norm_counts,
+#'   sample_metadata = metadata,
+#'   pos_effect_data = pos_effects
+#' )
+#' }
+#'
+#' @seealso [run_differential_analysis()], [correct_position_effect()]
+#' @export
+run_positional_differential_analysis <- function(count_matrix,
+                                                 normalization_matrix,
+                                                 sample_metadata,
+                                                 pos_effect_data,
+                                                 condition_levels = c("Day4", "Day7",
+                                                                      "Day10", "Day15"),
+                                                 shrinkage_type = "normal",
+                                                 alpha = 0.05,
+                                                 include_rate = TRUE,
+                                                 sample_prefix = "count_") {
+  logger::log_info("Running position-aware DESeq2 differential abundance analysis")
+
+  if (!all(c("SEQUENCE", "pos_effect") %in% names(pos_effect_data))) {
+    stop("pos_effect_data must contain 'SEQUENCE' and 'pos_effect' columns")
+  }
+
+  # Build condition data for samples in the count matrix
+  sample_names_lookup <- paste0(sample_prefix, sample_metadata$supplier_name)
+
+  condition_data <- data.frame(
+    condition = sample_metadata$condition[
+      match(colnames(count_matrix), sample_names_lookup)
+    ],
+    duration = sample_metadata$duration[
+      match(colnames(count_matrix), sample_names_lookup)
+    ],
+    replicate = sample_metadata$replicate[
+      match(colnames(count_matrix), sample_names_lookup)
+    ]
+  )
+  condition_data$condition <- factor(
+    condition_data$condition,
+    levels = condition_levels
+  )
+  rownames(condition_data) <- colnames(count_matrix)
+
+  # Estimate base size factors from control variants
+  size_factors <- compute_control_size_factors(
+    count_matrix = normalization_matrix,
+    sample_metadata = condition_data
+  )
+
+  # Build per-gene positional offsets
+  # Map pos_effect to count matrix rows via SEQUENCE (row names)
+  pos_effects <- pos_effect_data$pos_effect[
+    match(rownames(count_matrix), pos_effect_data$SEQUENCE)
+  ]
+  # Variants not in pos_effect_data get offset of 0 (no correction)
+  pos_effects[is.na(pos_effects)] <- 0
+
+  # Construct normalization factor matrix: norm[i,j] = size_factor[j] * 2^pos_effect[i]
+  norm_matrix <- outer(2^pos_effects, size_factors)
+  dimnames(norm_matrix) <- list(rownames(count_matrix), colnames(count_matrix))
+
+  # Create DESeq dataset
+  dds <- DESeq2::DESeqDataSetFromMatrix(
+    countData = count_matrix,
+    colData = condition_data,
+    design = ~ condition
+  )
+
+  # Apply normalization factor matrix instead of scalar size factors
+  DESeq2::normalizationFactors(dds) <- norm_matrix
+
+  # Run DESeq2
+  dds <- DESeq2::DESeq(dds)
+
+  # Regularized log transform for visualization
+  rld <- DESeq2::rlog(dds)
+
+  # Base results
+  res <- DESeq2::results(dds) |>
+    tibble::as_tibble(rownames = "SEQUENCE")
+
+  # Calculate z-scores
+  z_score <- SummarizedExperiment::assay(rld) |>
+    as.matrix() |>
+    t() |>
+    scale() |>
+    t() |>
+    tibble::as_tibble(rownames = "SEQUENCE")
+
+  colnames(z_score) <- paste0(colnames(z_score), "_z_score")
+  colnames(z_score)[1] <- "SEQUENCE"
+
+  # Get all contrasts
+  available_contrasts <- DESeq2::resultsNames(dds)
+  available_contrasts <- available_contrasts[2:length(available_contrasts)]
+
+  # Build multi-contrast summary using DEGreport
+  table_wald <- DEGreport::degComps(
+    dds,
+    combs = "condition",
+    contrast = available_contrasts,
+    alpha = alpha,
+    skip = FALSE,
+    type = shrinkage_type,
+    pairs = FALSE,
+    fdr = "default"
+  )
+
+  first_contrast <- names(table_wald)[1]
+
+  all_contrast_summary <- purrr::imap(table_wald, .create_deg_table) |>
+    purrr::reduce(dplyr::left_join, by = "SEQUENCE") |>
+    dplyr::rename(baseMean = paste0("baseMean_", first_contrast)) |>
+    dplyr::select(-dplyr::starts_with("baseMean_"))
+
+  # Add z-scores
+  all_contrast_summary <- all_contrast_summary |>
+    dplyr::left_join(z_score, by = "SEQUENCE")
+
+  # Continuous analysis for rate estimation
+  if (include_rate) {
+    logger::log_info("Running position-aware DESeq2 on continuous data for rate estimation")
+
+    continuous_dds <- DESeq2::DESeqDataSetFromMatrix(
+      countData = count_matrix,
+      colData = condition_data,
+      design = ~ duration
+    )
+
+    # Build continuous normalization matrix with same positional offsets
+    continuous_size_factors <- estimate_size_factors(
+      count_data = normalization_matrix,
+      col_data = condition_data,
+      design = "~ duration",
+      min_row_sum = 10,
+      reference_level = NULL
+    )
+
+    continuous_norm_matrix <- outer(2^pos_effects, continuous_size_factors)
+    dimnames(continuous_norm_matrix) <- list(
+      rownames(count_matrix), colnames(count_matrix)
+    )
+    DESeq2::normalizationFactors(continuous_dds) <- continuous_norm_matrix
+
+    continuous_dds <- DESeq2::DESeq(continuous_dds)
+
+    wald_continuous <- DEGreport::degComps(
+      continuous_dds,
+      combs = "duration",
+      alpha = alpha,
+      skip = FALSE,
+      type = shrinkage_type,
+      pairs = FALSE,
+      fdr = "default"
+    )
+
+    rate <- wald_continuous[[1]] |>
+      tibble::as_tibble(rownames = "SEQUENCE") |>
+      dplyr::rename_with(~ paste0(.x, "_continuous"), .cols = -"SEQUENCE") |>
+      dplyr::select(-dplyr::starts_with("baseMean_"))
+
+    all_contrast_summary <- dplyr::left_join(
+      all_contrast_summary,
+      rate,
+      by = "SEQUENCE"
+    )
+  }
+
+  # Return SGEResults object
+  SGEResults(
+    results = res,
+    rlog = rld,
+    contrast_summary = all_contrast_summary,
+    metadata = list(
+      condition_levels = condition_levels,
+      shrinkage_type = shrinkage_type,
+      alpha = alpha,
+      positional_correction = TRUE,
+      analysis_date = Sys.time()
+    )
+  )
+}
