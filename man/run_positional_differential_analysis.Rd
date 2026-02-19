@@ -10,6 +10,7 @@ run_positional_differential_analysis(
   sample_metadata,
   pos_effect_data,
   condition_levels = c("Day4", "Day7", "Day10", "Day15"),
+  reference_level = "Day0",
   shrinkage_type = "normal",
   alpha = 0.05,
   include_rate = TRUE,
@@ -26,13 +27,24 @@ estimation (e.g., synonymous/intronic variants).}
 \item{sample_metadata}{Data frame with sample information. Must contain
 \code{condition}, \code{duration}, and \code{supplier_name} columns.}
 
-\item{pos_effect_data}{A data frame with at minimum \code{SEQUENCE} and
-\code{pos_effect} columns (e.g., from \code{\link[=correct_position_effect]{correct_position_effect()}} after
-renaming). The \code{pos_effect} values are the fitted positional biases
-on the log2 scale.}
+\item{pos_effect_data}{Either:
+\describe{
+\item{A data frame}{with \code{SEQUENCE} and \code{pos_effect} columns — the same
+positional bias is applied to all non-reference samples (backward
+compatible; reference samples get pos_effect = 0)}
+\item{A named list of data frames}{keyed by condition (e.g.,
+\code{list(Day4 = df4, Day7 = df7, ...)}), each with \code{SEQUENCE} and
+\code{pos_effect} columns. Each condition gets its own positional bias;
+reference samples get pos_effect = 0.}
+}
+The \code{pos_effect} values are the fitted positional biases on the log2 scale.}
 
 \item{condition_levels}{Character vector specifying condition factor levels
 in order (default: c("Day4", "Day7", "Day10", "Day15")).}
+
+\item{reference_level}{Character. The reference condition level for
+size factor estimation (default: \code{"Day0"}). Samples with this
+condition always receive pos_effect = 0 in the normalization matrix.}
 
 \item{shrinkage_type}{Type of LFC shrinkage: "normal", "apeglm", or "ashr"
 (default: "normal").}
@@ -59,12 +71,18 @@ The function modifies the standard DESeq2 pipeline by replacing scalar
 size factors with a full normalization factor matrix:
 \enumerate{
 \item Computes base size factors from neutral variants (as usual)
-\item Constructs a normalization matrix where
-\code{norm[i,j] = size_factor[j] * 2^pos_effect[i]}
+\item Constructs a normalization matrix where reference samples use
+\code{norm[i,j] = size_factor[j]} (pos_effect = 0) and screen samples
+use \code{norm[i,j] = size_factor[j] * 2^pos_effect[i]}
 \item Sets \code{DESeq2::normalizationFactors(dds)} instead of
 \code{sizeFactors(dds)}
 \item Runs DESeq2 as normal — Wald tests now account for positional bias
 }
+
+When \code{pos_effect_data} is a named list, each condition column in the
+normalization matrix gets its own positional bias vector, breaking the
+row-constant symmetry that would otherwise cause position effects to cancel
+out in discrete contrasts.
 
 Variants not found in \code{pos_effect_data} receive a positional offset of 0
 (i.e., no correction). The downstream pipeline
@@ -73,12 +91,25 @@ works unchanged on the output.
 }
 \examples{
 \dontrun{
-pos_data <- calculate_position_effect(count_data, annotation, "Day4")
-corrected <- correct_position_effect(pos_data)
+# Per-timepoint position effects (recommended)
+all_pos <- calculate_all_position_effects(
+  count_data, annotation, c("Day4", "Day7", "Day10", "Day15")
+)
+corrected_list <- correct_all_position_effects(all_pos)
+pos_effect_list <- purrr::map(corrected_list, ~{
+  dplyr::select(.x, SEQUENCE, pos_effect) |> dplyr::distinct()
+})
 
-# Prepare pos_effect_data with SEQUENCE and pos_effect columns
+results <- run_positional_differential_analysis(
+  count_matrix = counts,
+  normalization_matrix = norm_counts,
+  sample_metadata = metadata,
+  pos_effect_data = pos_effect_list
+)
+
+# Single data frame (backward compatible)
 pos_effects <- corrected |>
-  dplyr::select(SEQUENCE = Seq, pos_effect) |>
+  dplyr::select(SEQUENCE, pos_effect) |>
   dplyr::distinct()
 
 results <- run_positional_differential_analysis(
@@ -91,5 +122,6 @@ results <- run_positional_differential_analysis(
 
 }
 \seealso{
-\code{\link[=run_differential_analysis]{run_differential_analysis()}}, \code{\link[=correct_position_effect]{correct_position_effect()}}
+\code{\link[=run_differential_analysis]{run_differential_analysis()}}, \code{\link[=correct_position_effect]{correct_position_effect()}},
+\code{\link[=calculate_all_position_effects]{calculate_all_position_effects()}}
 }

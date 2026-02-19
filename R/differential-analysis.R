@@ -840,10 +840,20 @@ test_position_corrected <- function(data,
 #' to account for positional bias in the count data.
 #'
 #' @inheritParams run_differential_analysis
-#' @param pos_effect_data A data frame with at minimum `SEQUENCE` and
-#'   `pos_effect` columns (e.g., from [correct_position_effect()] after
-#'   renaming). The `pos_effect` values are the fitted positional biases
-#'   on the log2 scale.
+#' @param pos_effect_data Either:
+#'   \describe{
+#'     \item{A data frame}{with `SEQUENCE` and `pos_effect` columns — the same
+#'       positional bias is applied to all non-reference samples (backward
+#'       compatible; reference samples get pos_effect = 0)}
+#'     \item{A named list of data frames}{keyed by condition (e.g.,
+#'       \code{list(Day4 = df4, Day7 = df7, ...)}), each with `SEQUENCE` and
+#'       `pos_effect` columns. Each condition gets its own positional bias;
+#'       reference samples get pos_effect = 0.}
+#'   }
+#'   The `pos_effect` values are the fitted positional biases on the log2 scale.
+#' @param reference_level Character. The reference condition level for
+#'   size factor estimation (default: \code{"Day0"}). Samples with this
+#'   condition always receive pos_effect = 0 in the normalization matrix.
 #'
 #' @return An [SGEResults] object, identical in structure to
 #'   [run_differential_analysis()] output.
@@ -853,12 +863,18 @@ test_position_corrected <- function(data,
 #' size factors with a full normalization factor matrix:
 #' \enumerate{
 #'   \item Computes base size factors from neutral variants (as usual)
-#'   \item Constructs a normalization matrix where
-#'     \code{norm[i,j] = size_factor[j] * 2^pos_effect[i]}
+#'   \item Constructs a normalization matrix where reference samples use
+#'     \code{norm[i,j] = size_factor[j]} (pos_effect = 0) and screen samples
+#'     use \code{norm[i,j] = size_factor[j] * 2^pos_effect[i]}
 #'   \item Sets \code{DESeq2::normalizationFactors(dds)} instead of
 #'     \code{sizeFactors(dds)}
 #'   \item Runs DESeq2 as normal — Wald tests now account for positional bias
 #' }
+#'
+#' When `pos_effect_data` is a named list, each condition column in the
+#' normalization matrix gets its own positional bias vector, breaking the
+#' row-constant symmetry that would otherwise cause position effects to cancel
+#' out in discrete contrasts.
 #'
 #' Variants not found in `pos_effect_data` receive a positional offset of 0
 #' (i.e., no correction). The downstream pipeline
@@ -867,12 +883,25 @@ test_position_corrected <- function(data,
 #'
 #' @examples
 #' \dontrun{
-#' pos_data <- calculate_position_effect(count_data, annotation, "Day4")
-#' corrected <- correct_position_effect(pos_data)
+#' # Per-timepoint position effects (recommended)
+#' all_pos <- calculate_all_position_effects(
+#'   count_data, annotation, c("Day4", "Day7", "Day10", "Day15")
+#' )
+#' corrected_list <- correct_all_position_effects(all_pos)
+#' pos_effect_list <- purrr::map(corrected_list, ~{
+#'   dplyr::select(.x, SEQUENCE, pos_effect) |> dplyr::distinct()
+#' })
 #'
-#' # Prepare pos_effect_data with SEQUENCE and pos_effect columns
+#' results <- run_positional_differential_analysis(
+#'   count_matrix = counts,
+#'   normalization_matrix = norm_counts,
+#'   sample_metadata = metadata,
+#'   pos_effect_data = pos_effect_list
+#' )
+#'
+#' # Single data frame (backward compatible)
 #' pos_effects <- corrected |>
-#'   dplyr::select(SEQUENCE = Seq, pos_effect) |>
+#'   dplyr::select(SEQUENCE, pos_effect) |>
 #'   dplyr::distinct()
 #'
 #' results <- run_positional_differential_analysis(
@@ -883,7 +912,8 @@ test_position_corrected <- function(data,
 #' )
 #' }
 #'
-#' @seealso [run_differential_analysis()], [correct_position_effect()]
+#' @seealso [run_differential_analysis()], [correct_position_effect()],
+#'   [calculate_all_position_effects()]
 #' @export
 run_positional_differential_analysis <- function(count_matrix,
                                                  normalization_matrix,
@@ -891,14 +921,26 @@ run_positional_differential_analysis <- function(count_matrix,
                                                  pos_effect_data,
                                                  condition_levels = c("Day4", "Day7",
                                                                       "Day10", "Day15"),
+                                                 reference_level = "Day0",
                                                  shrinkage_type = "normal",
                                                  alpha = 0.05,
                                                  include_rate = TRUE,
                                                  sample_prefix = "count_") {
   logger::log_info("Running position-aware DESeq2 differential abundance analysis")
 
-  if (!all(c("SEQUENCE", "pos_effect") %in% names(pos_effect_data))) {
-    stop("pos_effect_data must contain 'SEQUENCE' and 'pos_effect' columns")
+  # Validate pos_effect_data
+  if (is.data.frame(pos_effect_data)) {
+    if (!all(c("SEQUENCE", "pos_effect") %in% names(pos_effect_data))) {
+      stop("pos_effect_data must contain 'SEQUENCE' and 'pos_effect' columns")
+    }
+  } else if (is.list(pos_effect_data)) {
+    purrr::walk(names(pos_effect_data), function(nm) {
+      if (!all(c("SEQUENCE", "pos_effect") %in% names(pos_effect_data[[nm]]))) {
+        stop("Each element of pos_effect_data list must contain 'SEQUENCE' and 'pos_effect' columns (failed for '", nm, "')")
+      }
+    })
+  } else {
+    stop("pos_effect_data must be a data frame or a named list of data frames")
   }
 
   # Build condition data for samples in the count matrix
@@ -924,20 +966,18 @@ run_positional_differential_analysis <- function(count_matrix,
   # Estimate base size factors from control variants
   size_factors <- compute_control_size_factors(
     count_matrix = normalization_matrix,
-    sample_metadata = condition_data
+    sample_metadata = condition_data,
+    reference_level = reference_level
   )
 
-  # Build per-gene positional offsets
-  # Map pos_effect to count matrix rows via SEQUENCE (row names)
-  pos_effects <- pos_effect_data$pos_effect[
-    match(rownames(count_matrix), pos_effect_data$SEQUENCE)
-  ]
-  # Variants not in pos_effect_data get offset of 0 (no correction)
-  pos_effects[is.na(pos_effects)] <- 0
-
-  # Construct normalization factor matrix: norm[i,j] = size_factor[j] * 2^pos_effect[i]
-  norm_matrix <- outer(2^pos_effects, size_factors)
-  dimnames(norm_matrix) <- list(rownames(count_matrix), colnames(count_matrix))
+  # Build normalization factor matrix with per-timepoint position effects
+  norm_matrix <- .build_positional_norm_matrix(
+    pos_effect_data = pos_effect_data,
+    count_matrix = count_matrix,
+    size_factors = size_factors,
+    condition_data = condition_data,
+    reference_level = reference_level
+  )
 
   # Create DESeq dataset
   dds <- DESeq2::DESeqDataSetFromMatrix(
@@ -1016,9 +1056,12 @@ run_positional_differential_analysis <- function(count_matrix,
       reference_level = NULL
     )
 
-    continuous_norm_matrix <- outer(2^pos_effects, continuous_size_factors)
-    dimnames(continuous_norm_matrix) <- list(
-      rownames(count_matrix), colnames(count_matrix)
+    continuous_norm_matrix <- .build_positional_norm_matrix(
+      pos_effect_data = pos_effect_data,
+      count_matrix = count_matrix,
+      size_factors = continuous_size_factors,
+      condition_data = condition_data,
+      reference_level = reference_level
     )
     DESeq2::normalizationFactors(continuous_dds) <- continuous_norm_matrix
 
@@ -1059,4 +1102,68 @@ run_positional_differential_analysis <- function(count_matrix,
       analysis_date = Sys.time()
     )
   )
+}
+
+
+#' Build normalization factor matrix with positional offsets
+#'
+#' Constructs a normalization factor matrix where reference samples get
+#' pos_effect = 0 and screen samples get condition-specific (or shared)
+#' positional biases.
+#'
+#' @param pos_effect_data A data frame with `SEQUENCE` and `pos_effect` columns,
+#'   or a named list of such data frames keyed by condition.
+#' @param count_matrix The count matrix (used for row/column names).
+#' @param size_factors Named numeric vector of per-sample size factors.
+#' @param condition_data Data frame with a `condition` column, rownames matching
+#'   column names of `count_matrix`.
+#' @param reference_level Character. Condition level whose samples get
+#'   pos_effect = 0.
+#'
+#' @return A numeric matrix of normalization factors with the same dimensions
+#'   as `count_matrix`.
+#'
+#' @keywords internal
+.build_positional_norm_matrix <- function(pos_effect_data, count_matrix,
+                                          size_factors, condition_data,
+                                          reference_level) {
+  n_genes <- nrow(count_matrix)
+  n_samples <- ncol(count_matrix)
+  sample_conditions <- as.character(condition_data$condition)
+
+  # Initialize normalization matrix: each column = size_factor (pos_effect = 0)
+  norm_matrix <- matrix(
+    rep(size_factors, each = n_genes),
+    nrow = n_genes, ncol = n_samples
+  )
+  dimnames(norm_matrix) <- list(rownames(count_matrix), colnames(count_matrix))
+
+  if (is.data.frame(pos_effect_data)) {
+    # Single data frame: apply same pos_effect to all non-reference samples
+    pos_effects <- pos_effect_data$pos_effect[
+      match(rownames(count_matrix), pos_effect_data$SEQUENCE)
+    ]
+    pos_effects[is.na(pos_effects)] <- 0
+
+    for (j in seq_len(n_samples)) {
+      if (sample_conditions[j] != reference_level) {
+        norm_matrix[, j] <- size_factors[j] * 2^pos_effects
+      }
+    }
+  } else {
+    # Named list: each condition gets its own pos_effect vector
+    for (j in seq_len(n_samples)) {
+      cond <- sample_conditions[j]
+      if (cond == reference_level) next
+
+      if (cond %in% names(pos_effect_data)) {
+        pe_df <- pos_effect_data[[cond]]
+        pe <- pe_df$pos_effect[match(rownames(count_matrix), pe_df$SEQUENCE)]
+        pe[is.na(pe)] <- 0
+        norm_matrix[, j] <- size_factors[j] * 2^pe
+      }
+    }
+  }
+
+  norm_matrix
 }

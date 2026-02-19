@@ -426,3 +426,66 @@ correct_position_effect <- function(pos_ratio,
       )
     )
 }
+
+
+#' Calculate position effects for multiple timepoints
+#'
+#' Convenience wrapper that calls [calculate_position_effect()] for each
+#' timepoint and returns a named list of data frames.
+#'
+#' @inheritParams calculate_position_effect
+#' @param timepoints Character vector of timepoint conditions to compute
+#'   position effects for (e.g., \code{c("Day4", "Day7", "Day10", "Day15")}).
+#'
+#' @return A named list of data frames, one per timepoint, each containing
+#'   the output of [calculate_position_effect()].
+#'
+#' @examples
+#' \dontrun{
+#' all_pos <- calculate_all_position_effects(
+#'   dataframe = count_data,
+#'   annotation = annotation_df,
+#'   timepoints = c("Day4", "Day7", "Day10", "Day15")
+#' )
+#' }
+#'
+#' @seealso [calculate_position_effect()], [correct_all_position_effects()]
+#' @export
+calculate_all_position_effects <- function(dataframe, annotation,
+                                           timepoints, reference = "Day0") {
+  purrr::map(timepoints, ~calculate_position_effect(dataframe, annotation, .x, reference)) |>
+    purrr::set_names(timepoints)
+}
+
+
+#' Correct position effects for multiple timepoints
+#'
+#' Applies [slim_consequence()], [remove_artefacts()], and
+#' [correct_position_effect()] to each element of a position effect list
+#' (as returned by [calculate_all_position_effects()]).
+#'
+#' @param pos_effect_list A named list of data frames, as returned by
+#'   [calculate_all_position_effects()].
+#' @param span Loess span parameter passed to [correct_position_effect()]
+#'   (default: 0.3).
+#' @param ... Additional arguments passed to [correct_position_effect()].
+#'
+#' @return A named list of data frames, each with positional correction applied.
+#'
+#' @examples
+#' \dontrun{
+#' all_pos <- calculate_all_position_effects(
+#'   dataframe = count_data,
+#'   annotation = annotation_df,
+#'   timepoints = c("Day4", "Day7", "Day10", "Day15")
+#' )
+#' corrected_list <- correct_all_position_effects(all_pos)
+#' }
+#'
+#' @seealso [calculate_all_position_effects()], [correct_position_effect()]
+#' @export
+correct_all_position_effects <- function(pos_effect_list, span = 0.3, ...) {
+  purrr::map(pos_effect_list, ~{
+    slim_consequence(.x) |> remove_artefacts() |> correct_position_effect(span = span, ...)
+  })
+}
