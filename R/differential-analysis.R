@@ -249,6 +249,8 @@ run_differential_analysis <- function(count_matrix,
 #'   Consequence column for filtering neutral variants.
 #' @param neutral_variants Character vector of consequence types to use for
 #'   median calculation (default: c("intron_variant", "synonymous_variant")).
+#' @param per_targeton Logical; if TRUE and a `Targeton_ID` column exists,
+#'   compute medians separately for each targeton (default: FALSE).
 #'
 #' @return Data frame with additional median_log2FoldChange_* columns.
 #'
@@ -259,37 +261,100 @@ run_differential_analysis <- function(count_matrix,
 #' to identify these variants, computes the median for each log2FoldChange
 #' column, then broadcasts these values to all rows in the original data.
 #'
+#' When `per_targeton = TRUE`, medians are computed within each targeton,
+#' accounting for the fact that different targetons may have different
+#' neutral baselines.
+#'
 #' @examples
 #' \dontrun{
 #' # Using default neutral variants (recommended)
 #' data_with_medians <- calculate_median_scores(contrast_summary)
 #'
-#' # Using custom neutral variant types
+#' # Per-targeton medians for multi-targeton data
 #' data_with_medians <- calculate_median_scores(
 #'   contrast_summary,
-#'   neutral_variants = c("synonymous_variant")
+#'   per_targeton = TRUE
 #' )
 #' }
 #'
 #' @export
 calculate_median_scores <- function(data,
                                     neutral_variants = c("intron_variant",
-                                                         "synonymous_variant")) {
-  # Calculate medians from neutral variants using across()
-  medians <- data |>
-    dplyr::filter(.data$Consequence %in% neutral_variants) |>
-    dplyr::mutate(
-      dplyr::across(
-        dplyr::starts_with("log2FoldChange"),
-        ~ median(.x, na.rm = TRUE),
-        .names = "median_{.col}"
-      )
-    ) |>
-    dplyr::select(dplyr::starts_with("median_")) |>
-    dplyr::slice_head(n = 1)
+                                                         "synonymous_variant"),
+                                    per_targeton = FALSE) {
+  if (per_targeton && "Targeton_ID" %in% names(data)) {
+    # Per-targeton medians: compute within each targeton and join back
+    lfc_cols <- names(data)[startsWith(names(data), "log2FoldChange")]
 
-  # Bind median columns to original data
-  dplyr::bind_cols(data, medians)
+    medians <- data |>
+      dplyr::filter(.data$Consequence %in% neutral_variants) |>
+      dplyr::group_by(.data$Targeton_ID) |>
+      dplyr::summarise(
+        dplyr::across(
+          dplyr::all_of(lfc_cols),
+          ~ median(.x, na.rm = TRUE),
+          .names = "median_{.col}"
+        ),
+        .groups = "drop"
+      )
+
+    dplyr::left_join(data, medians, by = "Targeton_ID")
+  } else {
+    # Global medians (original behaviour)
+    medians <- data |>
+      dplyr::filter(.data$Consequence %in% neutral_variants) |>
+      dplyr::mutate(
+        dplyr::across(
+          dplyr::starts_with("log2FoldChange"),
+          ~ median(.x, na.rm = TRUE),
+          .names = "median_{.col}"
+        )
+      ) |>
+      dplyr::select(dplyr::starts_with("median_")) |>
+      dplyr::slice_head(n = 1)
+
+    dplyr::bind_cols(data, medians)
+  }
+}
+
+
+#' Compute per-targeton empirical null SD
+#'
+#' For a given contrast suffix, computes the standard deviation of
+#' `adj_lfc` from neutral non-PAM variants within each targeton.
+#'
+#' @param data A data frame with `adj_lfc_{suffix}`, `Consequence`,
+#'   `Targeton_ID`, and optionally `pam_mut_sgrna_id` columns.
+#' @param suffix The contrast suffix.
+#' @param neutral_variants Character vector of consequence types considered
+#'   neutral.
+#'
+#' @return A data frame with `Targeton_ID` and `null_sd_{suffix}` columns.
+#'
+#' @keywords internal
+.compute_null_sd <- function(data, suffix, neutral_variants) {
+  adj_lfc_col <- paste0("adj_lfc_", suffix)
+
+  neutral_data <- data |>
+    dplyr::filter(
+      .data$Consequence %in% neutral_variants,
+      is.finite(.data[[adj_lfc_col]])
+    )
+
+  # Exclude PAM-impacted variants if column exists
+  if ("pam_mut_sgrna_id" %in% names(data)) {
+    neutral_data <- neutral_data |>
+      dplyr::filter(is.na(.data$pam_mut_sgrna_id) | .data$pam_mut_sgrna_id == "")
+  }
+
+  null_sd_col <- paste0("null_sd_", suffix)
+
+  neutral_data |>
+    dplyr::group_by(.data$Targeton_ID) |>
+    dplyr::summarise(
+      "{null_sd_col}" := stats::sd(.data[[adj_lfc_col]], na.rm = TRUE),
+      .groups = "drop"
+    )
 }
 
 
@@ -300,6 +365,9 @@ calculate_median_scores <- function(data,
 #'
 #' @param data A data frame with log2FoldChange, lfcSE, and median columns.
 #' @param suffix The contrast suffix (e.g., "condition_Day7_vs_Day4").
+#' @param null_sd Optional data frame with `Targeton_ID` and
+#'   `null_sd_{suffix}` columns. When provided, the per-targeton empirical
+#'   SD is used as the z-score denominator instead of per-variant `lfcSE`.
 #'
 #' @return Data frame with additional adj_lfc_*, adj_score_*, pval_*, and
 #'   FDR_* columns for the specified suffix.
@@ -307,19 +375,40 @@ calculate_median_scores <- function(data,
 #' @details
 #' The adjusted log fold change subtracts the median LFC (from neutral variants)
 #' to center the distribution. The adjusted score is then computed as
-#' adj_lfc / lfcSE, which follows approximately a standard normal distribution
-#' under the null hypothesis. P-values are computed from a two-sided normal test.
+#' adj_lfc / lfcSE (or adj_lfc / null_sd when provided), which follows
+#' approximately a standard normal distribution under the null hypothesis.
+#' P-values are computed from a two-sided normal test.
 #'
 #' @keywords internal
-add_adj_columns <- function(data, suffix) {
+add_adj_columns <- function(data, suffix, neutral_variants = NULL) {
   lfc_col <- paste0("log2FoldChange_", suffix)
   se_col <- paste0("lfcSE_", suffix)
   median_col <- paste0("median_", lfc_col)
 
+  data <- data |>
+    dplyr::mutate(
+      "adj_lfc_{suffix}" := .data[[lfc_col]] - .data[[median_col]]
+    )
+
+  if (!is.null(neutral_variants)) {
+    # Compute per-targeton empirical null SD from the adj_lfc just created
+    null_sd <- .compute_null_sd(data, suffix, neutral_variants)
+    null_sd_col <- paste0("null_sd_", suffix)
+    data <- dplyr::left_join(data, null_sd, by = "Targeton_ID")
+    data <- data |>
+      dplyr::mutate(
+        "adj_score_{suffix}" := .data[[paste0("adj_lfc_", suffix)]] / .data[[null_sd_col]]
+      )
+    data[[null_sd_col]] <- NULL
+  } else {
+    data <- data |>
+      dplyr::mutate(
+        "adj_score_{suffix}" := .data[[paste0("adj_lfc_", suffix)]] / .data[[se_col]]
+      )
+  }
+
   data |>
     dplyr::mutate(
-      "adj_lfc_{suffix}" := .data[[lfc_col]] - .data[[median_col]],
-      "adj_score_{suffix}" := .data[[paste0("adj_lfc_", suffix)]] / .data[[se_col]],
       "pval_{suffix}" := stats::pnorm(abs(.data[[paste0("adj_score_", suffix)]]),
                                        lower.tail = FALSE) * 2,
       "FDR_{suffix}" := stats::p.adjust(.data[[paste0("pval_", suffix)]],
@@ -333,6 +422,10 @@ add_adj_columns <- function(data, suffix) {
 #' Applies [add_adj_columns()] to all contrasts found in the data.
 #'
 #' @param data A data frame with log2FoldChange columns for multiple contrasts.
+#' @param neutral_variants Optional character vector of consequence types
+#'   considered neutral. When non-NULL, per-targeton empirical null SD is
+#'   computed and used as the z-score denominator (requires `Targeton_ID`
+#'   and `Consequence` columns).
 #'
 #' @return Data frame with adjusted statistics for all contrasts.
 #'
@@ -342,12 +435,14 @@ add_adj_columns <- function(data, suffix) {
 #' }
 #'
 #' @export
-adjust_all_contrasts <- function(data) {
+adjust_all_contrasts <- function(data, neutral_variants = NULL) {
   suffixes <- names(data) |>
     stringr::str_subset("^log2FoldChange_") |>
     stringr::str_remove("^log2FoldChange_")
 
-  purrr::reduce(suffixes, \(d, s) add_adj_columns(d, s), .init = data)
+  purrr::reduce(suffixes, function(d, s) {
+    add_adj_columns(d, s, neutral_variants = neutral_variants)
+  }, .init = data)
 }
 
 
@@ -441,6 +536,13 @@ classify_all_contrasts <- function(data, fdr_threshold = 0.01) {
 #'   Must contain a Consequence column for identifying neutral variants.
 #' @param fdr_threshold FDR threshold for functional classification
 #'   (default: 0.01).
+#' @param per_targeton Logical; if TRUE, uses per-targeton median centering
+#'   and per-targeton empirical null SD for z-score computation
+#'   (default: FALSE).
+#' @param neutral_variants Character vector of consequence types used as
+#'   the neutral reference for per-targeton centering and null SD estimation.
+#'   Only used when `per_targeton = TRUE`
+#'   (default: c("intron_variant", "synonymous_variant")).
 #'
 #' @return Data frame with all computed statistics and classifications.
 #'
@@ -455,23 +557,38 @@ classify_all_contrasts <- function(data, fdr_threshold = 0.01) {
 #'     using [classify_all_contrasts()]
 #' }
 #'
+#' When `per_targeton = TRUE`, medians are computed within each targeton
+#' and z-scores use the per-targeton empirical SD of neutral variants
+#' instead of the DESeq2 `lfcSE`. This corrects for between-targeton
+#' differences in neutral baselines and for underestimation of null variance
+#' by `lfcSE`.
+#'
 #' @examples
 #' \dontrun{
 #' processed_data <- recalculate_screen_statistics(contrast_summary)
 #'
-#' # With custom FDR threshold
+#' # Per-targeton correction for multi-targeton screens
 #' processed_data <- recalculate_screen_statistics(
 #'   contrast_summary,
-#'   fdr_threshold = 0.05
+#'   per_targeton = TRUE
 #' )
 #' }
 #'
 #' @export
-recalculate_screen_statistics <- function(data, fdr_threshold = 0.01) {
-  data |>
-    calculate_median_scores() |>
-    adjust_all_contrasts() |>
-    classify_all_contrasts(fdr_threshold = fdr_threshold)
+recalculate_screen_statistics <- function(data,
+                                          fdr_threshold = 0.01,
+                                          per_targeton = FALSE,
+                                          neutral_variants = c("intron_variant",
+                                                               "synonymous_variant")) {
+  data <- calculate_median_scores(data, per_targeton = per_targeton)
+
+  if (per_targeton) {
+    data <- adjust_all_contrasts(data, neutral_variants = neutral_variants)
+  } else {
+    data <- adjust_all_contrasts(data)
+  }
+
+  classify_all_contrasts(data, fdr_threshold = fdr_threshold)
 }
 
 
@@ -489,6 +606,8 @@ recalculate_screen_statistics <- function(data, fdr_threshold = 0.01) {
 #'   Only used if `Targeton_ID` column doesn't exist in data.
 #' @param fdr_threshold FDR threshold for functional classification
 #'   (default: 0.01).
+#' @param per_targeton Logical; if TRUE, uses per-targeton median centering
+#'   and empirical null SD for z-score computation (default: FALSE).
 #'
 #' @return Data frame with annotations, adjusted statistics, functional
 #'   classifications, and simplified consequence types.
@@ -518,12 +637,13 @@ recalculate_screen_statistics <- function(data, fdr_threshold = 0.01) {
 #'   targeton_id = "GENE1_exon2"
 #' )
 #'
-#' # Multiple targeton workflow (Targeton_ID already in data)
+#' # Multiple targeton workflow with per-targeton correction
 #' contrast_tables <- map_dfr(deseq_results, pluck, "contrast_summary",
 #'                            .id = "Targeton_ID")
 #' processed <- post_process(
 #'   data = contrast_tables,
-#'   annotation = vep_annotations
+#'   annotation = vep_annotations,
+#'   per_targeton = TRUE
 #' )
 #' }
 #'
@@ -532,7 +652,8 @@ recalculate_screen_statistics <- function(data, fdr_threshold = 0.01) {
 post_process <- function(data,
                          annotation,
                          targeton_id = NULL,
-                         fdr_threshold = 0.01) {
+                         fdr_threshold = 0.01,
+                         per_targeton = FALSE) {
   # Add Targeton_ID if not present and targeton_id is provided
   if (!"Targeton_ID" %in% names(data)) {
     if (is.null(targeton_id)) {
@@ -546,7 +667,8 @@ post_process <- function(data,
       annotation,
       by = c("SEQUENCE" = "Seq", "Targeton_ID" = "Targeton_ID")
     ) |>
-    recalculate_screen_statistics(fdr_threshold = fdr_threshold) |>
+    recalculate_screen_statistics(fdr_threshold = fdr_threshold,
+                                  per_targeton = per_targeton) |>
     slim_consequence()
 }
 
