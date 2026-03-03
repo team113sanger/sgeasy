@@ -1145,6 +1145,9 @@ run_positional_differential_analysis <- function(count_matrix,
     ]
     pos_effects[is.na(pos_effects)] <- 0
 
+    # Center pos_effects: remove global shift already captured by size factors
+    pos_effects <- pos_effects - median(pos_effects, na.rm = TRUE)
+
     for (j in seq_len(n_samples)) {
       if (sample_conditions[j] != reference_level) {
         norm_matrix[, j] <- size_factors[j] * 2^pos_effects
@@ -1160,6 +1163,10 @@ run_positional_differential_analysis <- function(count_matrix,
         pe_df <- pos_effect_data[[cond]]
         pe <- pe_df$pos_effect[match(rownames(count_matrix), pe_df$SEQUENCE)]
         pe[is.na(pe)] <- 0
+
+        # Center: remove global shift captured by size factors
+        pe <- pe - median(pe, na.rm = TRUE)
+
         norm_matrix[, j] <- size_factors[j] * 2^pe
       }
     }
